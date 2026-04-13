@@ -4,9 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
+	battmcp "github.com/dpopsuev/battery/mcp"
+	"github.com/dpopsuev/battery/mcpserver"
+	"github.com/dpopsuev/battery/server"
 	"github.com/dpopsuev/battery/testkit"
 	"github.com/dpopsuev/battery/tool"
+	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // TestE2E_StubPipeline proves the full architecture composes with stubs:
@@ -106,6 +111,93 @@ func TestE2E_GateEnrichRecord(t *testing.T) {
 	}
 	if len(recorder.Records) != 1 {
 		t.Errorf("recorder.Records = %d, want 1", len(recorder.Records))
+	}
+}
+
+// TestE2E_MCPClientServerRoundTrip proves the full MCP stack:
+// mcpserver.Server builds a server → mcp.MCPAdapter connects as client →
+// tools discovered → tool.Execute routes through MCP → result returned.
+// This is how implementors and consumers will use Battery.
+func TestE2E_MCPClientServerRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// 1. Build a server with mcpserver framework.
+	srv := mcpserver.NewServer("test-instrument", "v1.0.0").
+		WithInstructions("Test instrument for E2E").
+		Tool(server.ToolMeta{
+			Name:        "analyze",
+			Description: "Analyze code quality",
+			Keywords:    []string{"code", "quality"},
+		}, func(_ context.Context, input json.RawMessage) (string, error) {
+			var args struct {
+				Path string `json:"path"`
+			}
+			json.Unmarshal(input, &args)
+			return `{"score":95,"path":"` + args.Path + `"}`, nil
+		}).
+		Tool(server.ToolMeta{
+			Name:        "lint",
+			Description: "Run linter",
+		}, func(_ context.Context, _ json.RawMessage) (string, error) {
+			return `{"issues":0}`, nil
+		})
+
+	// 2. Connect via in-memory transport.
+	serverTransport, clientTransport := sdkmcp.NewInMemoryTransports()
+	go func() { _ = srv.Serve(ctx, serverTransport) }()
+
+	// 3. MCPAdapter discovers and registers tools.
+	registry := tool.NewRegistry()
+	adapter := battmcp.NewMCPAdapter(registry)
+	if err := adapter.RegisterMCP(ctx, "instrument", clientTransport); err != nil {
+		t.Fatalf("RegisterMCP: %v", err)
+	}
+
+	// 4. Verify tools are discoverable with prefixed names.
+	names := registry.Names()
+	if len(names) != 2 {
+		t.Fatalf("discovered %d tools, want 2: %v", len(names), names)
+	}
+	if names[0] != "instrument.analyze" || names[1] != "instrument.lint" {
+		t.Errorf("names = %v", names)
+	}
+
+	// 5. Execute through the registry — routes through MCP.
+	result, err := registry.Execute(ctx, "instrument.analyze", json.RawMessage(`{"path":"main.go"}`))
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	var parsed struct {
+		Score int    `json:"score"`
+		Path  string `json:"path"`
+	}
+	if err := json.Unmarshal([]byte(result), &parsed); err != nil {
+		t.Fatalf("unmarshal result: %v (raw: %q)", err, result)
+	}
+	if parsed.Score != 95 || parsed.Path != "main.go" {
+		t.Errorf("result = %+v", parsed)
+	}
+
+	// 6. Clearance filtering works on MCP-backed tools.
+	cleared := server.NewClearance(registry, []string{"instrument.lint"})
+	if len(cleared.Names()) != 1 {
+		t.Errorf("clearance: %d tools visible, want 1", len(cleared.Names()))
+	}
+	_, err = cleared.Execute(ctx, "instrument.analyze", nil)
+	if err == nil {
+		t.Error("clearance should block instrument.analyze")
+	}
+
+	// 7. Cleanup.
+	if err := adapter.UnregisterMCP("instrument"); err != nil {
+		t.Fatalf("UnregisterMCP: %v", err)
+	}
+	if len(registry.Names()) != 0 {
+		t.Errorf("after unregister: %v", registry.Names())
 	}
 }
 
