@@ -88,7 +88,7 @@ func TestEnvelope_RecorderRecords(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	env.Execute(context.Background(), "read", json.RawMessage(`{}`)) //nolint:errcheck
+	env.Execute(context.Background(), "read", json.RawMessage(`{}`)) //nolint:errcheck // test — error not relevant to assertion
 
 	if len(recorder.Records) != 1 {
 		t.Fatalf("recorder.Records = %d, want 1", len(recorder.Records))
@@ -172,5 +172,59 @@ func TestPolicyGate_AllowsAndDenies(t *testing.T) {
 	}
 	if v.Reason != "path not writable" {
 		t.Errorf("reason = %q", v.Reason)
+	}
+}
+
+func TestDefaultRecorder_CalledWhenNoExplicit(t *testing.T) {
+	rec := &testkit.StubRecorder{}
+	middleware.SetDefaultRecorder(rec)
+	defer middleware.SetDefaultRecorder(nil)
+
+	executor := testkit.NewStubExecutor(testkit.NewStubTool("read", ""))
+	env, err := middleware.NewBuilder(executor).
+		WithGate(testkit.NewStubSecurityGate(true, "")).
+		Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	env.Execute(context.Background(), "read", json.RawMessage(`{}`)) //nolint:errcheck // test — error not relevant to assertion
+
+	if len(rec.Records) != 1 {
+		t.Fatalf("default recorder calls = %d, want 1", len(rec.Records))
+	}
+	if rec.Records[0].Tool != "read" {
+		t.Errorf("tool = %q, want read", rec.Records[0].Tool)
+	}
+}
+
+func TestDefaultRecorder_NotCalledWhenExplicitSet(t *testing.T) {
+	defRec := &testkit.StubRecorder{}
+	middleware.SetDefaultRecorder(defRec)
+	defer middleware.SetDefaultRecorder(nil)
+
+	explicitRec := &testkit.StubRecorder{}
+	executor := testkit.NewStubExecutor(testkit.NewStubTool("read", ""))
+	env, err := middleware.NewBuilder(executor).
+		WithGate(testkit.NewStubSecurityGate(true, "")).
+		WithRecorder(explicitRec).
+		Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	env.Execute(context.Background(), "read", json.RawMessage(`{}`)) //nolint:errcheck // test — error not relevant to assertion
+
+	if len(defRec.Records) != 0 {
+		t.Errorf("default recorder should NOT fire when explicit recorder is set, got %d calls", len(defRec.Records))
+	}
+	if len(explicitRec.Records) != 1 {
+		t.Errorf("explicit recorder calls = %d, want 1", len(explicitRec.Records))
+	}
+}
+
+func TestDefaultRecorder_NilByDefault(t *testing.T) {
+	if middleware.DefaultRecorder() != nil {
+		t.Error("default recorder should be nil before SetDefaultRecorder")
 	}
 }

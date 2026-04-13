@@ -49,3 +49,15 @@ func AsSecurityGate(g Gate) SecurityGate {
 type Recorder interface {
 	Record(ctx context.Context, tool string, input json.RawMessage, output string, err error, elapsed time.Duration)
 }
+
+// defaultRecorder is the package-level recorder that fires for every
+// Envelope.Execute call when no explicit recorders are configured.
+// Set once at process startup via SetDefaultRecorder.
+var defaultRecorder Recorder //nolint:gochecknoglobals // intentional global, like slog.SetDefault
+
+// SetDefaultRecorder sets the package-level default recorder.
+// Pass nil to clear.
+func SetDefaultRecorder(r Recorder) { defaultRecorder = r }
+
+// DefaultRecorder returns the current default recorder (nil if not set).
+func DefaultRecorder() Recorder { return defaultRecorder }

@@ -58,7 +58,11 @@ func (e *Envelope) Execute(ctx context.Context, name string, input json.RawMessa
 	}
 
 	// Recorders (always run, errors swallowed).
-	for _, r := range e.recorders {
+	recorders := e.recorders
+	if len(recorders) == 0 && defaultRecorder != nil {
+		recorders = []Recorder{defaultRecorder}
+	}
+	for _, r := range recorders {
 		r.Record(ctx, name, input, output, execErr, elapsed)
 	}
 
