@@ -3,6 +3,7 @@ package testkit_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/dpopsuev/battery/testkit"
@@ -56,7 +57,7 @@ func TestStubExecutor_NotFound(t *testing.T) {
 	exec := testkit.NewStubExecutor()
 
 	_, err := exec.Execute(context.Background(), "missing", nil)
-	if err != tool.ErrNotFound {
+	if !errors.Is(err, tool.ErrNotFound) {
 		t.Errorf("expected ErrNotFound, got %v", err)
 	}
 }

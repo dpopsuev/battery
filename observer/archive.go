@@ -10,7 +10,7 @@ import (
 
 // Archive is a serializable snapshot of a ring buffer.
 type Archive struct {
-	SessionID string  `json:"session_id,omitempty"`
+	SessionID string    `json:"session_id,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 	Filter    string    `json:"filter,omitempty"`
 	Events    []Event   `json:"events"`
@@ -97,8 +97,8 @@ func Diff(before, after *Archive) *DiffResult {
 		if len(afterVals) == 0 {
 			continue
 		}
-		bp50 := percentileDuration(beforeVals, 50) //nolint:mnd
-		ap50 := percentileDuration(afterVals, 50)  //nolint:mnd
+		bp50 := percentileDuration(beforeVals, 50) //nolint:mnd // p50 percentile
+		ap50 := percentileDuration(afterVals, 50)  //nolint:mnd // p50 percentile
 		change := 0.0
 		if bp50 > 0 {
 			change = float64(ap50-bp50) / float64(bp50) * 100
@@ -107,7 +107,7 @@ func Diff(before, after *Archive) *DiffResult {
 		result.LatencyDeltas = append(result.LatencyDeltas, LatencyDelta{
 			Server: server, Tool: toolName,
 			BeforeP50: bp50, AfterP50: ap50,
-			Change: math.Round(change*10) / 10, //nolint:mnd
+			Change: math.Round(change*10) / 10, //nolint:mnd // round to 1 decimal
 		})
 	}
 

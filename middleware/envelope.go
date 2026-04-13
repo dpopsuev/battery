@@ -31,7 +31,7 @@ func (e *Envelope) Execute(ctx context.Context, name string, input json.RawMessa
 	for _, g := range e.gates {
 		v, err := g.Check(ctx, name, input)
 		if err != nil {
-			return "", fmt.Errorf("%w: gate error: %v", ErrToolDenied, err)
+			return "", fmt.Errorf("%w: gate error: %w", ErrToolDenied, err)
 		}
 		if !v.Allowed {
 			return "", fmt.Errorf("%w: %s", ErrToolDenied, v.Reason)

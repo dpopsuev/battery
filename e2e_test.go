@@ -3,6 +3,7 @@ package battery_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -51,7 +52,7 @@ func TestE2E_StubPipeline(t *testing.T) {
 
 	// 5. Execute unknown tool — should fail.
 	_, err = executor.Execute(ctx, "delete", nil)
-	if err != tool.ErrNotFound {
+	if !errors.Is(err, tool.ErrNotFound) {
 		t.Errorf("expected ErrNotFound for unknown tool, got %v", err)
 	}
 
@@ -218,7 +219,7 @@ func TestE2E_PolicyEnforcement(t *testing.T) {
 	// Set enforcer to deny.
 	enforcer.Err = tool.ErrNotFound
 	err = enforcer.Check(ctx, token, "write", nil)
-	if err != tool.ErrNotFound {
+	if !errors.Is(err, tool.ErrNotFound) {
 		t.Errorf("expected ErrNotFound, got %v", err)
 	}
 }

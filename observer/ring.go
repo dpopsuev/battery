@@ -65,9 +65,9 @@ func (r *Ring) Last(n int) []Event {
 func (r *Ring) Since(t time.Time) []Event {
 	all := r.Last(r.Stats().Count)
 	var out []Event
-	for _, e := range all {
-		if e.Timestamp.After(t) {
-			out = append(out, e)
+	for i := range all {
+		if all[i].Timestamp.After(t) {
+			out = append(out, all[i])
 		}
 	}
 	return out
@@ -77,9 +77,9 @@ func (r *Ring) Since(t time.Time) []Event {
 func (r *Ring) ByParent(parentID string) []Event {
 	all := r.Last(r.Stats().Count)
 	var out []Event
-	for _, e := range all {
-		if e.ParentID == parentID {
-			out = append(out, e)
+	for i := range all {
+		if all[i].ParentID == parentID {
+			out = append(out, all[i])
 		}
 	}
 	return out
@@ -89,9 +89,9 @@ func (r *Ring) ByParent(parentID string) []Event {
 func (r *Ring) ByComponent(c Component) []Event {
 	all := r.Last(r.Stats().Count)
 	var out []Event
-	for _, e := range all {
-		if e.Component == c {
-			out = append(out, e)
+	for i := range all {
+		if all[i].Component == c {
+			out = append(out, all[i])
 		}
 	}
 	return out
@@ -100,9 +100,9 @@ func (r *Ring) ByComponent(c Component) []Event {
 // Get returns a specific event by ID.
 func (r *Ring) Get(id string) (Event, bool) {
 	all := r.Last(r.Stats().Count)
-	for _, e := range all {
-		if e.ID == id {
-			return e, true
+	for i := range all {
+		if all[i].ID == id {
+			return all[i], true
 		}
 	}
 	return Event{}, false

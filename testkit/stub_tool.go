@@ -30,7 +30,7 @@ func NewStubTool(name, desc string) *StubTool {
 	return &StubTool{NameVal: name, DescVal: desc, Result: "ok"}
 }
 
-func (s *StubTool) Name() string                { return s.NameVal }
+func (s *StubTool) Name() string                 { return s.NameVal }
 func (s *StubTool) Description() string          { return s.DescVal }
 func (s *StubTool) InputSchema() json.RawMessage { return s.SchemaVal }
 
