@@ -11,6 +11,7 @@ import (
 	"github.com/dpopsuev/battery/cache"
 	battmcp "github.com/dpopsuev/battery/mcp"
 	"github.com/dpopsuev/battery/mcpserver"
+	"github.com/dpopsuev/battery/middleware"
 	"github.com/dpopsuev/battery/observer"
 	"github.com/dpopsuev/battery/server"
 	"github.com/dpopsuev/battery/testkit"
@@ -549,5 +550,134 @@ func TestE2E_Workbench(t *testing.T) {
 	}
 	if result != "slow" {
 		t.Errorf("swap fallback: got %q, want slow", result)
+	}
+}
+
+// TestE2E_GaugeBasic proves the Gauged optional interface works
+// at the tool level — type-assert, call LastMeasurement.
+func TestE2E_GaugeBasic(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	gauged := &testkit.StubGaugedTool{
+		StubTool: *testkit.NewStubTool("analyze", "Analyze code"),
+		Measurements: []tool.Measurement{
+			{Name: "tokens_in", Value: 42, Unit: "tokens"},
+			{Name: "files_scanned", Value: 7, Unit: "count"},
+		},
+	}
+	gauged.Result = "analysis complete"
+
+	reg := tool.NewRegistry()
+	reg.Register(gauged)
+
+	result, err := reg.Execute(ctx, "analyze", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result != "analysis complete" {
+		t.Errorf("result = %q", result)
+	}
+
+	// Type-assert Gauged on the tool.
+	t2, _ := reg.Get("analyze")
+	g, ok := t2.(tool.Gauged)
+	if !ok {
+		t.Fatal("expected tool to implement Gauged")
+	}
+	ms := g.LastMeasurement()
+	if len(ms) != 2 {
+		t.Fatalf("expected 2 measurements, got %d", len(ms))
+	}
+	if ms[0].Name != "tokens_in" || ms[0].Value != 42 {
+		t.Errorf("measurement[0] = %+v", ms[0])
+	}
+
+	// Plain tool does not implement Gauged.
+	plain := testkit.NewStubTool("plain", "")
+	reg.Register(plain)
+	t3, _ := reg.Get("plain")
+	if _, ok := t3.(tool.Gauged); ok {
+		t.Error("plain tool should not implement Gauged")
+	}
+}
+
+// TestE2E_GaugeFullChain proves the full gauge pipeline:
+// StubGaugedTool → Envelope + GaugeFunc(RingHook) → gauge event in Ring.
+func TestE2E_GaugeFullChain(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	// 1. Gauged tool.
+	gauged := &testkit.StubGaugedTool{
+		StubTool: *testkit.NewStubTool("analyze", "Analyze"),
+		Measurements: []tool.Measurement{
+			{Name: "tokens", Value: 42, Unit: "tok"},
+		},
+	}
+	gauged.Result = "done"
+
+	// 2. Non-gauged tool.
+	plain := testkit.NewStubTool("lint", "Lint")
+	plain.Result = "clean"
+
+	executor := testkit.NewStubExecutor(gauged, plain)
+
+	// 3. Observer ring + hook.
+	ring := observer.NewRing(100)
+	hook := observer.NewRingHook(ring)
+
+	// 4. Build Envelope with GaugeFunc wired to hook.
+	env, err := middleware.NewBuilder(executor).
+		WithGate(testkit.NewStubSecurityGate(true, "")).
+		WithGaugeFunc(hook.OnGaugeMeasurement).
+		Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 5. Execute gauged tool.
+	result, err := env.Execute(ctx, "analyze", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result != "done" {
+		t.Errorf("result = %q", result)
+	}
+
+	// 6. Verify gauge event in Ring.
+	events := ring.Last(10)
+	var gaugeEvent *observer.Event
+	for i := range events {
+		if events[i].Action == "gauge" {
+			gaugeEvent = &events[i]
+			break
+		}
+	}
+	if gaugeEvent == nil {
+		t.Fatal("expected gauge event in ring")
+	}
+	if gaugeEvent.Tool != "analyze" {
+		t.Errorf("gauge event tool = %q", gaugeEvent.Tool)
+	}
+	if gaugeEvent.Metadata["tokens"] != "42 tok" {
+		t.Errorf("gauge metadata = %v", gaugeEvent.Metadata)
+	}
+
+	// 7. Execute non-gauged tool — no gauge event.
+	beforeCount := len(ring.Last(100))
+	_, err = env.Execute(ctx, "lint", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	afterEvents := ring.Last(100)
+	gaugeCount := 0
+	for _, e := range afterEvents[beforeCount:] {
+		if e.Action == "gauge" {
+			gaugeCount++
+		}
+	}
+	if gaugeCount != 0 {
+		t.Errorf("expected no gauge event for non-gauged tool, got %d", gaugeCount)
 	}
 }

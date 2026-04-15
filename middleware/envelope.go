@@ -21,7 +21,8 @@ type Envelope struct {
 	enrichers        []Enricher
 	recorders        []Recorder
 	executor         tool.Executor
-	maxResultDefault int // default max output bytes; 0 = unlimited
+	maxResultDefault int       // default max output bytes; 0 = unlimited
+	gaugeFunc        GaugeFunc // optional; nil = no gauge collection
 }
 
 var _ tool.Executor = (*Envelope)(nil)
@@ -61,6 +62,11 @@ func (e *Envelope) Execute(ctx context.Context, name string, input json.RawMessa
 	// Truncate output if MaxResultSize is configured.
 	if execErr == nil {
 		output = e.truncateOutput(name, output)
+	}
+
+	// Gauge (optional, non-blocking, errors swallowed).
+	if execErr == nil && e.gaugeFunc != nil {
+		e.collectGauge(ctx, name)
 	}
 
 	// Recorders (always run, errors swallowed).
@@ -103,6 +109,21 @@ func (e *Envelope) truncateOutput(name, output string) string {
 	return output
 }
 
+// collectGauge checks if the executed tool implements Gauged and fires gaugeFunc.
+func (e *Envelope) collectGauge(ctx context.Context, name string) {
+	for _, t := range e.executor.All() {
+		if t.Name() == name {
+			if g, ok := t.(tool.Gauged); ok {
+				ms := g.LastMeasurement()
+				if len(ms) > 0 {
+					e.gaugeFunc(ctx, name, ms)
+				}
+			}
+			return
+		}
+	}
+}
+
 // Builder constructs an Envelope with "security by construction" —
 // Build() refuses without at least one SecurityGate.
 type Builder struct {
@@ -112,6 +133,7 @@ type Builder struct {
 	executor         tool.Executor
 	hasSecurity      bool
 	maxResultDefault int
+	gaugeFunc        GaugeFunc
 }
 
 // NewBuilder creates an Envelope builder wrapping the given executor.
@@ -168,6 +190,14 @@ func (b *Builder) WithMaxResultSize(n int) *Builder {
 	return b
 }
 
+// WithGaugeFunc sets a callback for tools that implement tool.Gauged.
+// After Execute, if the tool reports measurements, fn is called.
+// The callback should not block.
+func (b *Builder) WithGaugeFunc(fn GaugeFunc) *Builder {
+	b.gaugeFunc = fn
+	return b
+}
+
 // Build creates the Envelope. Fails if no SecurityGate was added.
 func (b *Builder) Build() (*Envelope, error) {
 	if !b.hasSecurity {
@@ -179,5 +209,6 @@ func (b *Builder) Build() (*Envelope, error) {
 		recorders:        b.recorders,
 		executor:         b.executor,
 		maxResultDefault: b.maxResultDefault,
+		gaugeFunc:        b.gaugeFunc,
 	}, nil
 }

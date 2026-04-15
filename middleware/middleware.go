@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"time"
+
+	"github.com/dpopsuev/battery/tool"
 )
 
 // ErrToolDenied indicates a tool call was rejected by a Gate.
@@ -44,6 +46,11 @@ func (securityGateAdapter) isSecurityGate() {}
 func AsSecurityGate(g Gate) SecurityGate {
 	return securityGateAdapter{g}
 }
+
+// GaugeFunc receives measurements from tools that implement tool.Gauged.
+// Called by the Envelope after Execute when configured via WithGaugeFunc.
+// Defined as a function type to avoid coupling middleware to observer.
+type GaugeFunc func(ctx context.Context, tool string, measurements []tool.Measurement)
 
 // Recorder observes after tool execution.
 type Recorder interface {

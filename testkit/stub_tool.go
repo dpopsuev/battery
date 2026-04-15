@@ -74,6 +74,17 @@ var _ tool.Availability = (*StubAvailableTool)(nil)
 // Available returns the configured availability.
 func (s *StubAvailableTool) Available() bool { return s.IsAvailable }
 
+// StubGaugedTool extends StubTool with Gauged.
+type StubGaugedTool struct {
+	StubTool
+	Measurements []tool.Measurement
+}
+
+var _ tool.Gauged = (*StubGaugedTool)(nil)
+
+// LastMeasurement returns the configured measurements.
+func (s *StubGaugedTool) LastMeasurement() []tool.Measurement { return s.Measurements }
+
 // StubExecutor implements tool.Executor. Dispatches to registered StubTools.
 type StubExecutor struct {
 	tools map[string]tool.Tool

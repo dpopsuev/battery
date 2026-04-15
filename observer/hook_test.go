@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/dpopsuev/battery/observer"
+	"github.com/dpopsuev/battery/tool"
 )
 
 // HookContract validates any Hook implementation.
@@ -27,6 +28,13 @@ func HookContract(t *testing.T, newHook func() observer.Hook) {
 	t.Run("OnToolResult_Error", func(t *testing.T) {
 		h := newHook()
 		h.OnToolResult(context.Background(), "read", "", errors.New("not found"), 10*time.Millisecond)
+	})
+
+	t.Run("OnGaugeMeasurement", func(t *testing.T) {
+		h := newHook()
+		h.OnGaugeMeasurement(context.Background(), "read", []tool.Measurement{
+			{Name: "bytes", Value: 1024, Unit: "bytes"},
+		})
 	})
 }
 
@@ -64,6 +72,34 @@ func TestRingHook(t *testing.T) {
 	}
 	if events[1].Error {
 		t.Error("second event should not have error flag")
+	}
+}
+
+func TestRingHook_Gauge(t *testing.T) {
+	ring := observer.NewRing(100)
+	h := observer.NewRingHook(ring)
+
+	h.OnGaugeMeasurement(context.Background(), "analyze", []tool.Measurement{
+		{Name: "tokens_in", Value: 42, Unit: "tokens"},
+		{Name: "bytes_read", Value: 1024, Unit: "bytes"},
+	})
+
+	events := ring.Last(1)
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	e := events[0]
+	if e.Action != "gauge" {
+		t.Errorf("action: got %q, want gauge", e.Action)
+	}
+	if e.Tool != "analyze" {
+		t.Errorf("tool: got %q, want analyze", e.Tool)
+	}
+	if e.Metadata["tokens_in"] != "42 tokens" {
+		t.Errorf("metadata[tokens_in] = %q", e.Metadata["tokens_in"])
+	}
+	if e.Metadata["bytes_read"] != "1024 bytes" {
+		t.Errorf("metadata[bytes_read] = %q", e.Metadata["bytes_read"])
 	}
 }
 

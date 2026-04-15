@@ -3,14 +3,18 @@ package observer
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"time"
+
+	"github.com/dpopsuev/battery/tool"
 )
 
 // Hook receives notifications about tool lifecycle events.
 // Implementations must be safe for concurrent use.
 type Hook interface {
-	OnToolCall(ctx context.Context, tool string, input json.RawMessage)
-	OnToolResult(ctx context.Context, tool string, output string, err error, elapsed time.Duration)
+	OnToolCall(ctx context.Context, toolName string, input json.RawMessage)
+	OnToolResult(ctx context.Context, toolName string, output string, err error, elapsed time.Duration)
+	OnGaugeMeasurement(ctx context.Context, toolName string, measurements []tool.Measurement)
 }
 
 // RingHook adapts a Ring into a Hook, translating hook calls into Event appends.
@@ -24,24 +28,39 @@ func NewRingHook(r *Ring) *RingHook {
 }
 
 // OnToolCall records a tool invocation event.
-func (h *RingHook) OnToolCall(_ context.Context, tool string, _ json.RawMessage) {
+func (h *RingHook) OnToolCall(_ context.Context, toolName string, _ json.RawMessage) {
 	h.ring.Append(Event{
 		Component: ComponentTool,
 		Action:    "call",
-		Tool:      tool,
+		Tool:      toolName,
 		Detail:    "tool invoked",
 	})
 }
 
 // OnToolResult records a tool completion event with latency and error status.
-func (h *RingHook) OnToolResult(_ context.Context, tool, _ string, err error, elapsed time.Duration) {
+func (h *RingHook) OnToolResult(_ context.Context, toolName, _ string, err error, elapsed time.Duration) {
 	h.ring.Append(Event{
 		Component: ComponentTool,
 		Action:    "call" + ActionDoneSuffix,
-		Tool:      tool,
+		Tool:      toolName,
 		Detail:    "tool completed",
 		Latency:   elapsed,
 		Error:     err != nil,
+	})
+}
+
+// OnGaugeMeasurement records tool measurements as a gauge event.
+func (h *RingHook) OnGaugeMeasurement(_ context.Context, toolName string, measurements []tool.Measurement) {
+	meta := make(map[string]string, len(measurements))
+	for _, m := range measurements {
+		meta[m.Name] = fmt.Sprintf("%g %s", m.Value, m.Unit)
+	}
+	h.ring.Append(Event{
+		Component: ComponentTool,
+		Action:    "gauge",
+		Tool:      toolName,
+		Detail:    "tool measurement",
+		Metadata:  meta,
 	})
 }
 
@@ -56,15 +75,22 @@ func NewMultiHook(hooks ...Hook) *MultiHook {
 }
 
 // OnToolCall forwards to all wrapped hooks.
-func (m *MultiHook) OnToolCall(ctx context.Context, tool string, input json.RawMessage) {
+func (m *MultiHook) OnToolCall(ctx context.Context, toolName string, input json.RawMessage) {
 	for _, h := range m.hooks {
-		h.OnToolCall(ctx, tool, input)
+		h.OnToolCall(ctx, toolName, input)
 	}
 }
 
 // OnToolResult forwards to all wrapped hooks.
-func (m *MultiHook) OnToolResult(ctx context.Context, tool, output string, err error, elapsed time.Duration) {
+func (m *MultiHook) OnToolResult(ctx context.Context, toolName, output string, err error, elapsed time.Duration) {
 	for _, h := range m.hooks {
-		h.OnToolResult(ctx, tool, output, err, elapsed)
+		h.OnToolResult(ctx, toolName, output, err, elapsed)
+	}
+}
+
+// OnGaugeMeasurement forwards to all wrapped hooks.
+func (m *MultiHook) OnGaugeMeasurement(ctx context.Context, toolName string, measurements []tool.Measurement) {
+	for _, h := range m.hooks {
+		h.OnGaugeMeasurement(ctx, toolName, measurements)
 	}
 }
