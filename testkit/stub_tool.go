@@ -41,6 +41,39 @@ func (s *StubTool) Execute(_ context.Context, _ json.RawMessage) (string, error)
 	return s.Result, s.Err
 }
 
+// StubCapableTool extends StubTool with CapabilityDeclarer.
+type StubCapableTool struct {
+	StubTool
+	Capabilities []string
+}
+
+var _ tool.CapabilityDeclarer = (*StubCapableTool)(nil)
+
+// RequiredCapabilities returns the configured capabilities.
+func (s *StubCapableTool) RequiredCapabilities() []string { return s.Capabilities }
+
+// StubMetadataTool extends StubTool with ToolMetadata.
+type StubMetadataTool struct {
+	StubTool
+	Meta tool.Metadata
+}
+
+var _ tool.ToolMetadata = (*StubMetadataTool)(nil)
+
+// Metadata returns the configured metadata.
+func (s *StubMetadataTool) Metadata() tool.Metadata { return s.Meta }
+
+// StubAvailableTool extends StubTool with Availability.
+type StubAvailableTool struct {
+	StubTool
+	IsAvailable bool
+}
+
+var _ tool.Availability = (*StubAvailableTool)(nil)
+
+// Available returns the configured availability.
+func (s *StubAvailableTool) Available() bool { return s.IsAvailable }
+
 // StubExecutor implements tool.Executor. Dispatches to registered StubTools.
 type StubExecutor struct {
 	tools map[string]tool.Tool

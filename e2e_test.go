@@ -4,14 +4,19 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
+	"github.com/dpopsuev/battery/cache"
 	battmcp "github.com/dpopsuev/battery/mcp"
 	"github.com/dpopsuev/battery/mcpserver"
+	"github.com/dpopsuev/battery/observer"
 	"github.com/dpopsuev/battery/server"
 	"github.com/dpopsuev/battery/testkit"
 	"github.com/dpopsuev/battery/tool"
+	"github.com/dpopsuev/battery/typed"
+	"github.com/dpopsuev/battery/workbench"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -202,6 +207,89 @@ func TestE2E_MCPClientServerRoundTrip(t *testing.T) {
 	}
 }
 
+// TestE2E_ObserverCacheRoundTrip proves the observer Hook and Cache compose
+// with the MCP stack: tool call → Hook fires → result cached → evict → miss.
+func TestE2E_ObserverCacheRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// 1. Build MCP server with a tool.
+	srv := mcpserver.NewServer("data-svc", "v1.0.0").
+		Tool(server.ToolMeta{Name: "fetch", Description: "Fetch data"}, func(_ context.Context, input json.RawMessage) (string, error) {
+			var args struct {
+				ID string `json:"id"`
+			}
+			json.Unmarshal(input, &args)
+			return `{"result":"data-` + args.ID + `"}`, nil
+		})
+
+	serverTransport, clientTransport := sdkmcp.NewInMemoryTransports()
+	go func() { _ = srv.Serve(ctx, serverTransport) }()
+
+	// 2. Connect via MCPAdapter.
+	registry := tool.NewRegistry()
+	adapter := battmcp.NewMCPAdapter(registry)
+	if err := adapter.RegisterMCP(ctx, "data", clientTransport); err != nil {
+		t.Fatalf("RegisterMCP: %v", err)
+	}
+
+	// 3. Wire observer Hook to Ring.
+	ring := observer.NewRing(100)
+	hook := observer.NewRingHook(ring)
+
+	// 4. Wire MemCache.
+	mc := cache.NewMemCache(cache.MemCacheConfig{MaxEntries: 100})
+
+	// 5. Execute tool, fire hook, cache result.
+	input := json.RawMessage(`{"id":"42"}`)
+	hook.OnToolCall(ctx, "data.fetch", input)
+	start := time.Now()
+	result, err := registry.Execute(ctx, "data.fetch", input)
+	elapsed := time.Since(start)
+	hook.OnToolResult(ctx, "data.fetch", result, err, elapsed)
+
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	// Cache the result.
+	if err := mc.Set(ctx, "data", "fetch:42", []byte(result), 0); err != nil {
+		t.Fatalf("Cache Set: %v", err)
+	}
+
+	// 6. Verify Hook recorded events.
+	events := ring.Last(10)
+	if len(events) != 2 {
+		t.Fatalf("expected 2 events, got %d", len(events))
+	}
+	if events[0].Action != "call" || events[0].Tool != "data.fetch" {
+		t.Errorf("first event: %+v", events[0])
+	}
+	if events[1].Action != "call_done" || events[1].Tool != "data.fetch" {
+		t.Errorf("second event: %+v", events[1])
+	}
+
+	// 7. Cache hit.
+	cached, ok, err := mc.Get(ctx, "data", "fetch:42")
+	if err != nil || !ok {
+		t.Fatalf("expected cache hit, got ok=%v err=%v", ok, err)
+	}
+	if string(cached) != result {
+		t.Errorf("cached = %q, want %q", cached, result)
+	}
+
+	// 8. Evict namespace, verify miss.
+	if err := mc.EvictNamespace(ctx, "data"); err != nil {
+		t.Fatalf("EvictNamespace: %v", err)
+	}
+	_, ok, _ = mc.Get(ctx, "data", "fetch:42")
+	if ok {
+		t.Error("expected cache miss after eviction")
+	}
+}
+
 // TestE2E_PolicyEnforcement proves policy stubs compose with executor.
 func TestE2E_PolicyEnforcement(t *testing.T) {
 	t.Parallel()
@@ -221,5 +309,245 @@ func TestE2E_PolicyEnforcement(t *testing.T) {
 	err = enforcer.Check(ctx, token, "write", nil)
 	if !errors.Is(err, tool.ErrNotFound) {
 		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+}
+
+// TestE2E_ToolMetadata proves metadata, availability gating, and
+// MaxResultSize truncation compose end-to-end.
+func TestE2E_ToolMetadata(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	// 1. Tool with metadata (MaxResultSize=20).
+	metaTool := &testkit.StubMetadataTool{
+		StubTool: *testkit.NewStubTool("verbose", "produces lots of output"),
+		Meta:     tool.Metadata{MaxResultSize: 20, Capabilities: []string{"read"}},
+	}
+	metaTool.Result = "0123456789abcdefghijklmnopqrstuvwxyz" // 36 bytes
+
+	// 2. Tool with dynamic availability (starts available, then disabled).
+	dynTool := &testkit.StubAvailableTool{
+		StubTool:    *testkit.NewStubTool("dynamic", "can be toggled"),
+		IsAvailable: true,
+	}
+	dynTool.Result = "dynamic-result"
+
+	// 3. Plain tool (no optional interfaces).
+	plain := testkit.NewStubTool("plain", "always available")
+
+	// 4. Register all in registry.
+	reg := tool.NewRegistry()
+	reg.Register(metaTool)
+	reg.Register(dynTool)
+	reg.Register(plain)
+
+	// 5. Verify all three visible.
+	if len(reg.Names()) != 3 {
+		t.Fatalf("expected 3 tools, got %v", reg.Names())
+	}
+
+	// 6. ToolMetadata is accessible via type assertion.
+	for _, tt := range reg.All() {
+		if tm, ok := tt.(tool.ToolMetadata); ok {
+			meta := tm.Metadata()
+			if meta.MaxResultSize != 20 {
+				t.Errorf("MaxResultSize = %d, want 20", meta.MaxResultSize)
+			}
+			if len(meta.Capabilities) != 1 || meta.Capabilities[0] != "read" {
+				t.Errorf("Capabilities = %v", meta.Capabilities)
+			}
+		}
+	}
+
+	// 7. Disable dynamic tool.
+	dynTool.IsAvailable = false
+
+	names := reg.Names()
+	for _, n := range names {
+		if n == "dynamic" {
+			t.Error("dynamic tool should not appear when unavailable")
+		}
+	}
+	if len(names) != 2 {
+		t.Errorf("expected 2 tools after disabling dynamic, got %v", names)
+	}
+
+	// 8. Execute unavailable tool returns ErrNotFound.
+	_, err := reg.Execute(ctx, "dynamic", nil)
+	if !errors.Is(err, tool.ErrNotFound) {
+		t.Errorf("expected ErrNotFound for unavailable, got %v", err)
+	}
+
+	// 9. Re-enable.
+	dynTool.IsAvailable = true
+	_, err = reg.Execute(ctx, "dynamic", nil)
+	if err != nil {
+		t.Errorf("execute re-enabled dynamic: %v", err)
+	}
+}
+
+// TestE2E_TypedToolOnMCPServer proves a TypedTool with auto-derived schema
+// can be registered on an MCP server and called by a client with typed args.
+func TestE2E_TypedToolOnMCPServer(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	type analyzeInput struct {
+		Path  string `json:"path"`
+		Depth int    `json:"depth,omitempty"`
+	}
+
+	// 1. Create TypedTool with auto-derived schema.
+	tt := typed.New("analyze", "Analyze code", func(_ context.Context, in analyzeInput) (string, error) {
+		return fmt.Sprintf(`{"path":%q,"depth":%d}`, in.Path, in.Depth), nil
+	})
+
+	// 2. Register on MCP server using the tool's own schema.
+	srv := mcpserver.NewServer("typed-svc", "v1.0.0").
+		ToolWithSchema(
+			server.ToolMeta{Name: tt.Name(), Description: tt.Description()},
+			tt.InputSchema(),
+			func(ctx context.Context, input json.RawMessage) (string, error) {
+				return tt.Execute(ctx, input)
+			},
+		)
+
+	// 3. Connect client.
+	serverTransport, clientTransport := sdkmcp.NewInMemoryTransports()
+	go func() { _ = srv.Serve(ctx, serverTransport) }()
+
+	registry := tool.NewRegistry()
+	adapter := battmcp.NewMCPAdapter(registry)
+	if err := adapter.RegisterMCP(ctx, "typed", clientTransport); err != nil {
+		t.Fatalf("RegisterMCP: %v", err)
+	}
+
+	// 4. Verify tool discovered with schema.
+	names := registry.Names()
+	if len(names) != 1 || names[0] != "typed.analyze" {
+		t.Fatalf("names = %v, want [typed.analyze]", names)
+	}
+
+	// 5. Execute with typed input.
+	result, err := registry.Execute(ctx, "typed.analyze", json.RawMessage(`{"path":"main.go","depth":3}`))
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	var parsed struct {
+		Path  string `json:"path"`
+		Depth int    `json:"depth"`
+	}
+	if err := json.Unmarshal([]byte(result), &parsed); err != nil {
+		t.Fatalf("unmarshal result: %v (raw: %q)", err, result)
+	}
+	if parsed.Path != "main.go" || parsed.Depth != 3 {
+		t.Errorf("result = %+v, want {main.go 3}", parsed)
+	}
+}
+
+// TestE2E_Workbench proves the Workbench composes MCP-backed tools and
+// builtin tools with pipes and conditional swaps.
+func TestE2E_Workbench(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// 1. Build MCP server with a tool.
+	srv := mcpserver.NewServer("svc", "v1.0.0").
+		Tool(server.ToolMeta{Name: "analyze", Description: "Analyze"}, func(_ context.Context, input json.RawMessage) (string, error) {
+			var args struct {
+				Path string `json:"path"`
+			}
+			json.Unmarshal(input, &args)
+			return "analyzed:" + args.Path, nil
+		})
+
+	serverTransport, clientTransport := sdkmcp.NewInMemoryTransports()
+	go func() { _ = srv.Serve(ctx, serverTransport) }()
+
+	// 2. Connect via MCPAdapter.
+	registry := tool.NewRegistry()
+	adapter := battmcp.NewMCPAdapter(registry)
+	if err := adapter.RegisterMCP(ctx, "svc", clientTransport); err != nil {
+		t.Fatalf("RegisterMCP: %v", err)
+	}
+
+	// 3. Create a builtin tool.
+	formatter := testkit.NewStubTool("format", "Format output")
+	formatter.Result = "formatted"
+
+	// 4. Compose Workbench: mount MCP tools + craft builtin.
+	wb := workbench.New().
+		Mount(registry).
+		Craft(formatter)
+
+	// 5. Verify all tools visible.
+	names := wb.Names()
+	if len(names) != 2 {
+		t.Fatalf("Workbench names = %v, want 2 tools", names)
+	}
+
+	// 6. Execute MCP tool through workbench.
+	result, err := wb.Execute(ctx, "svc.analyze", json.RawMessage(`{"path":"main.go"}`))
+	if err != nil {
+		t.Fatalf("Execute svc.analyze: %v", err)
+	}
+	if result != "analyzed:main.go" {
+		t.Errorf("result = %q", result)
+	}
+
+	// 7. Execute builtin through workbench.
+	result, err = wb.Execute(ctx, "format", nil)
+	if err != nil {
+		t.Fatalf("Execute format: %v", err)
+	}
+	if result != "formatted" {
+		t.Errorf("format result = %q", result)
+	}
+
+	// 8. Pipe: chain analyze → format.
+	wb.Pipe("analyze-then-format", "svc.analyze", "format")
+	result, err = wb.Execute(ctx, "analyze-then-format", json.RawMessage(`{"path":"test.go"}`))
+	if err != nil {
+		t.Fatalf("Execute pipe: %v", err)
+	}
+	// Final result is format tool's output.
+	if result != "formatted" {
+		t.Errorf("pipe result = %q, want formatted", result)
+	}
+
+	// 9. Swap: conditional tool selection.
+	fastRead := testkit.NewStubTool("read", "fast reader")
+	fastRead.Result = "fast"
+	slowRead := testkit.NewStubTool("read", "slow reader")
+	slowRead.Result = "slow"
+
+	usesFast := true
+	wb.Swap(workbench.SwapRule{
+		Name:      "read",
+		Predicate: func() bool { return usesFast },
+		Primary:   fastRead,
+		Fallback:  slowRead,
+	})
+
+	result, err = wb.Execute(ctx, "read", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result != "fast" {
+		t.Errorf("swap primary: got %q, want fast", result)
+	}
+
+	usesFast = false
+	result, err = wb.Execute(ctx, "read", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result != "slow" {
+		t.Errorf("swap fallback: got %q, want slow", result)
 	}
 }

@@ -91,3 +91,59 @@ func TestRegistry_Contract(t *testing.T) {
 		return r
 	})
 }
+
+// TestRegistry_AvailabilityFiltering proves that unavailable tools are
+// excluded from All(), Names(), and Execute().
+func TestRegistry_AvailabilityFiltering(t *testing.T) {
+	t.Parallel()
+
+	available := &testkit.StubAvailableTool{
+		StubTool:    *testkit.NewStubTool("visible", ""),
+		IsAvailable: true,
+	}
+	unavailable := &testkit.StubAvailableTool{
+		StubTool:    *testkit.NewStubTool("hidden", ""),
+		IsAvailable: false,
+	}
+	plain := testkit.NewStubTool("plain", "no availability interface")
+
+	r := tool.NewRegistry()
+	r.Register(available)
+	r.Register(unavailable)
+	r.Register(plain)
+
+	// All() excludes unavailable.
+	all := r.All()
+	if len(all) != 2 {
+		t.Errorf("All() = %d tools, want 2 (visible + plain)", len(all))
+	}
+
+	// Names() excludes unavailable.
+	names := r.Names()
+	for _, n := range names {
+		if n == "hidden" {
+			t.Error("Names() should not include unavailable tool")
+		}
+	}
+	if len(names) != 2 {
+		t.Errorf("Names() = %v, want [plain visible]", names)
+	}
+
+	// Execute() returns ErrNotFound for unavailable.
+	_, err := r.Execute(context.Background(), "hidden", nil)
+	if !errors.Is(err, tool.ErrNotFound) {
+		t.Errorf("Execute unavailable: expected ErrNotFound, got %v", err)
+	}
+
+	// Execute() works for available tools.
+	_, err = r.Execute(context.Background(), "visible", nil)
+	if err != nil {
+		t.Errorf("Execute available: %v", err)
+	}
+
+	// Non-Availability tools are always available.
+	_, err = r.Execute(context.Background(), "plain", nil)
+	if err != nil {
+		t.Errorf("Execute plain (no Availability): %v", err)
+	}
+}

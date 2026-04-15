@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/dpopsuev/battery/middleware"
@@ -226,5 +227,87 @@ func TestDefaultRecorder_NotCalledWhenExplicitSet(t *testing.T) {
 func TestDefaultRecorder_NilByDefault(t *testing.T) {
 	if middleware.DefaultRecorder() != nil {
 		t.Error("default recorder should be nil before SetDefaultRecorder")
+	}
+}
+
+func TestEnvelope_MaxResultSize_Truncates(t *testing.T) {
+	t.Parallel()
+	stub := testkit.NewStubTool("read", "")
+	stub.Result = "a]very long output that should be truncated" // 44 bytes
+	executor := testkit.NewStubExecutor(stub)
+
+	env, err := middleware.NewBuilder(executor).
+		WithGate(testkit.NewStubSecurityGate(true, "")).
+		WithMaxResultSize(10).
+		Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := env.Execute(context.Background(), "read", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result) <= 10 {
+		// Should have truncated content + marker.
+		t.Errorf("expected truncated output longer than 10 due to marker, got %d", len(result))
+	}
+	if result[:10] != "a]very lon" {
+		t.Errorf("truncated prefix = %q", result[:10])
+	}
+	if !strings.Contains(result, "[battery: output truncated") {
+		t.Errorf("missing truncation marker in: %q", result)
+	}
+}
+
+func TestEnvelope_MaxResultSize_NoTruncateUnderLimit(t *testing.T) {
+	t.Parallel()
+	stub := testkit.NewStubTool("read", "")
+	stub.Result = "short"
+	executor := testkit.NewStubExecutor(stub)
+
+	env, err := middleware.NewBuilder(executor).
+		WithGate(testkit.NewStubSecurityGate(true, "")).
+		WithMaxResultSize(100).
+		Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := env.Execute(context.Background(), "read", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result != "short" {
+		t.Errorf("result = %q, want short (no truncation)", result)
+	}
+}
+
+func TestEnvelope_MaxResultSize_PerToolOverride(t *testing.T) {
+	t.Parallel()
+	stub := &testkit.StubMetadataTool{
+		StubTool: *testkit.NewStubTool("read", ""),
+		Meta:     tool.Metadata{MaxResultSize: 5},
+	}
+	stub.Result = "0123456789" // 10 bytes, exceeds per-tool limit of 5
+	executor := testkit.NewStubExecutor(stub)
+
+	env, err := middleware.NewBuilder(executor).
+		WithGate(testkit.NewStubSecurityGate(true, "")).
+		WithMaxResultSize(100). // Default is 100, but per-tool is 5.
+		Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := env.Execute(context.Background(), "read", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result[:5] != "01234" {
+		t.Errorf("truncated at per-tool limit: prefix = %q", result[:5])
+	}
+	if !strings.Contains(result, "[battery: output truncated") {
+		t.Errorf("missing truncation marker: %q", result)
 	}
 }

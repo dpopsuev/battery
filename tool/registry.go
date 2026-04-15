@@ -39,29 +39,46 @@ func (r *Registry) Get(name string) (Tool, error) {
 }
 
 // Execute dispatches a tool call by name.
+// Returns ErrNotFound if the tool is not registered or not available.
 func (r *Registry) Execute(ctx context.Context, name string, input json.RawMessage) (string, error) {
 	t, err := r.Get(name)
 	if err != nil {
 		return "", err
 	}
+	if !isAvailable(t) {
+		return "", fmt.Errorf("%w: %s", ErrNotFound, name)
+	}
 	return t.Execute(ctx, input)
 }
 
-// All returns all registered tools.
+// All returns all registered tools that are currently available.
 func (r *Registry) All() []Tool {
 	out := make([]Tool, 0, len(r.tools))
 	for _, t := range r.tools {
-		out = append(out, t)
+		if isAvailable(t) {
+			out = append(out, t)
+		}
 	}
 	return out
 }
 
-// Names returns all registered tool names sorted alphabetically.
+// Names returns available tool names sorted alphabetically.
 func (r *Registry) Names() []string {
 	out := make([]string, 0, len(r.tools))
-	for name := range r.tools {
-		out = append(out, name)
+	for name, t := range r.tools {
+		if isAvailable(t) {
+			out = append(out, name)
+		}
 	}
 	sort.Strings(out)
 	return out
+}
+
+// isAvailable checks the Availability optional interface.
+// Tools that do not implement Availability are always available.
+func isAvailable(t Tool) bool {
+	if a, ok := t.(Availability); ok {
+		return a.Available()
+	}
+	return true
 }

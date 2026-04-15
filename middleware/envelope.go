@@ -17,10 +17,11 @@ var ErrNoSecurityGate = errors.New("battery: cannot build Envelope without Secur
 // Envelope wraps a tool.Executor with Gate → Enrich → Execute → Record pipeline.
 // Implements tool.Executor (LSP — substitutable for any Executor).
 type Envelope struct {
-	gates     []Gate
-	enrichers []Enricher
-	recorders []Recorder
-	executor  tool.Executor
+	gates            []Gate
+	enrichers        []Enricher
+	recorders        []Recorder
+	executor         tool.Executor
+	maxResultDefault int // default max output bytes; 0 = unlimited
 }
 
 var _ tool.Executor = (*Envelope)(nil)
@@ -57,6 +58,11 @@ func (e *Envelope) Execute(ctx context.Context, name string, input json.RawMessa
 		output = output + "\n\n" + strings.Join(enrichments, "\n")
 	}
 
+	// Truncate output if MaxResultSize is configured.
+	if execErr == nil {
+		output = e.truncateOutput(name, output)
+	}
+
 	// Recorders (always run, errors swallowed).
 	recorders := e.recorders
 	if len(recorders) == 0 && defaultRecorder != nil {
@@ -75,14 +81,37 @@ func (e *Envelope) All() []tool.Tool { return e.executor.All() }
 // Names delegates to the wrapped executor.
 func (e *Envelope) Names() []string { return e.executor.Names() }
 
+// truncateOutput applies per-tool or default MaxResultSize truncation.
+func (e *Envelope) truncateOutput(name, output string) string {
+	limit := e.maxResultDefault
+
+	// Check per-tool override via ToolMetadata.
+	for _, t := range e.executor.All() {
+		if t.Name() == name {
+			if tm, ok := t.(tool.ToolMetadata); ok {
+				if perTool := tm.Metadata().MaxResultSize; perTool > 0 {
+					limit = perTool
+				}
+			}
+			break
+		}
+	}
+
+	if limit > 0 && len(output) > limit {
+		return output[:limit] + fmt.Sprintf("\n[battery: output truncated, %d bytes of %d limit]", len(output), limit)
+	}
+	return output
+}
+
 // Builder constructs an Envelope with "security by construction" —
 // Build() refuses without at least one SecurityGate.
 type Builder struct {
-	gates       []Gate
-	enrichers   []Enricher
-	recorders   []Recorder
-	executor    tool.Executor
-	hasSecurity bool
+	gates            []Gate
+	enrichers        []Enricher
+	recorders        []Recorder
+	executor         tool.Executor
+	hasSecurity      bool
+	maxResultDefault int
 }
 
 // NewBuilder creates an Envelope builder wrapping the given executor.
@@ -131,15 +160,24 @@ func (b *Builder) WithRecorders(rs ...Recorder) *Builder {
 	return b
 }
 
+// WithMaxResultSize sets the default max output size in bytes.
+// Tools that implement ToolMetadata can override this per-tool.
+// Zero means unlimited (default).
+func (b *Builder) WithMaxResultSize(n int) *Builder {
+	b.maxResultDefault = n
+	return b
+}
+
 // Build creates the Envelope. Fails if no SecurityGate was added.
 func (b *Builder) Build() (*Envelope, error) {
 	if !b.hasSecurity {
 		return nil, ErrNoSecurityGate
 	}
 	return &Envelope{
-		gates:     b.gates,
-		enrichers: b.enrichers,
-		recorders: b.recorders,
-		executor:  b.executor,
+		gates:            b.gates,
+		enrichers:        b.enrichers,
+		recorders:        b.recorders,
+		executor:         b.executor,
+		maxResultDefault: b.maxResultDefault,
 	}, nil
 }
