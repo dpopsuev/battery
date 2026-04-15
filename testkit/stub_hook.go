@@ -19,7 +19,7 @@ type StubHookToolCall struct {
 // StubHookToolResult records one OnToolResult invocation.
 type StubHookToolResult struct {
 	Tool    string
-	Output  string
+	Result  tool.Result
 	Err     error
 	Elapsed time.Duration
 }
@@ -30,12 +30,20 @@ type StubGaugeMeasurement struct {
 	Measurements []tool.Measurement
 }
 
+// StubCacheEvent records one OnCacheHit or OnCacheMiss invocation.
+type StubCacheEvent struct {
+	Tool string
+	Key  string
+	Hit  bool
+}
+
 // StubHook implements observer.Hook with call recording.
 type StubHook struct {
 	mu                sync.Mutex
 	ToolCalls         []StubHookToolCall
 	ToolResults       []StubHookToolResult
 	GaugeMeasurements []StubGaugeMeasurement
+	CacheEvents       []StubCacheEvent
 }
 
 var _ observer.Hook = (*StubHook)(nil)
@@ -46,14 +54,26 @@ func (h *StubHook) OnToolCall(_ context.Context, tool string, input json.RawMess
 	h.ToolCalls = append(h.ToolCalls, StubHookToolCall{Tool: tool, Input: input})
 }
 
-func (h *StubHook) OnToolResult(_ context.Context, toolName, output string, err error, elapsed time.Duration) {
+func (h *StubHook) OnToolResult(_ context.Context, toolName string, result tool.Result, err error, elapsed time.Duration) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.ToolResults = append(h.ToolResults, StubHookToolResult{Tool: toolName, Output: output, Err: err, Elapsed: elapsed})
+	h.ToolResults = append(h.ToolResults, StubHookToolResult{Tool: toolName, Result: result, Err: err, Elapsed: elapsed})
 }
 
 func (h *StubHook) OnGaugeMeasurement(_ context.Context, toolName string, measurements []tool.Measurement) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.GaugeMeasurements = append(h.GaugeMeasurements, StubGaugeMeasurement{Tool: toolName, Measurements: measurements})
+}
+
+func (h *StubHook) OnCacheHit(_ context.Context, toolName, key string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.CacheEvents = append(h.CacheEvents, StubCacheEvent{Tool: toolName, Key: key, Hit: true})
+}
+
+func (h *StubHook) OnCacheMiss(_ context.Context, toolName, key string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.CacheEvents = append(h.CacheEvents, StubCacheEvent{Tool: toolName, Key: key, Hit: false})
 }

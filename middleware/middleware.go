@@ -15,7 +15,7 @@ var ErrToolDenied = errors.New("battery: tool denied")
 
 // Gate decides whether a tool call is allowed.
 type Gate interface {
-	Check(ctx context.Context, tool string, input json.RawMessage) (Verdict, error)
+	Check(ctx context.Context, toolName string, input json.RawMessage) (Verdict, error)
 }
 
 // Verdict is the result of a Gate check.
@@ -33,7 +33,7 @@ type SecurityGate interface {
 
 // Enricher injects context before tool execution.
 type Enricher interface {
-	Enrich(ctx context.Context, tool string, input json.RawMessage) (string, error)
+	Enrich(ctx context.Context, toolName string, input json.RawMessage) (string, error)
 }
 
 // securityGateAdapter wraps any Gate as a SecurityGate.
@@ -50,11 +50,11 @@ func AsSecurityGate(g Gate) SecurityGate {
 // GaugeFunc receives measurements from tools that implement tool.Gauged.
 // Called by the Envelope after Execute when configured via WithGaugeFunc.
 // Defined as a function type to avoid coupling middleware to observer.
-type GaugeFunc func(ctx context.Context, tool string, measurements []tool.Measurement)
+type GaugeFunc func(ctx context.Context, toolName string, measurements []tool.Measurement)
 
 // Recorder observes after tool execution.
 type Recorder interface {
-	Record(ctx context.Context, tool string, input json.RawMessage, output string, err error, elapsed time.Duration)
+	Record(ctx context.Context, toolName string, input json.RawMessage, result tool.Result, err error, elapsed time.Duration)
 }
 
 // defaultRecorder is the package-level recorder that fires for every

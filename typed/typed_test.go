@@ -3,7 +3,6 @@ package typed_test
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"testing"
 
 	"github.com/dpopsuev/battery/tool"
@@ -13,6 +12,11 @@ import (
 type analyzeInput struct {
 	Path  string `json:"path"`
 	Depth int    `json:"depth,omitempty"`
+}
+
+type analyzeOutput struct {
+	Path  string `json:"path"`
+	Depth int    `json:"depth"`
 }
 
 func TestSchemaFor_Struct(t *testing.T) {
@@ -26,12 +30,10 @@ func TestSchemaFor_Struct(t *testing.T) {
 		t.Fatalf("schema is not valid JSON: %v", err)
 	}
 
-	// Should be an object type.
 	if parsed["type"] != "object" {
 		t.Errorf("schema type = %v, want object", parsed["type"])
 	}
 
-	// Should have "path" and "depth" as properties.
 	props, ok := parsed["properties"].(map[string]any)
 	if !ok {
 		t.Fatalf("missing properties in schema: %v", parsed)
@@ -55,44 +57,59 @@ func TestSchemaForSafe_Success(t *testing.T) {
 }
 
 func TestTypedTool_ImplementsTool(t *testing.T) {
-	tt := typed.New[analyzeInput]("analyze", "Analyze code", func(_ context.Context, in analyzeInput) (string, error) {
-		return fmt.Sprintf("analyzed %s at depth %d", in.Path, in.Depth), nil
+	tt := typed.New("analyze", "Analyze code", func(_ context.Context, in analyzeInput) (analyzeOutput, error) {
+		return analyzeOutput(in), nil
 	})
-
-	var _ tool.Tool = tt // compile-time check
+	var _ tool.Tool = tt
 }
 
 func TestTypedTool_Execute(t *testing.T) {
-	tt := typed.New[analyzeInput]("analyze", "Analyze code", func(_ context.Context, in analyzeInput) (string, error) {
-		return fmt.Sprintf("path=%s depth=%d", in.Path, in.Depth), nil
+	tt := typed.New("analyze", "Analyze code", func(_ context.Context, in analyzeInput) (analyzeOutput, error) {
+		return analyzeOutput(in), nil
 	})
 
 	result, err := tt.Execute(context.Background(), json.RawMessage(`{"path":"main.go","depth":3}`))
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if result != "path=main.go depth=3" {
-		t.Errorf("result = %q", result)
+
+	// StructuredContent should be set.
+	if result.StructuredContent == nil {
+		t.Fatal("StructuredContent is nil")
+	}
+
+	// Text fallback should contain JSON.
+	var parsed analyzeOutput
+	if err := json.Unmarshal([]byte(result.Text()), &parsed); err != nil {
+		t.Fatalf("unmarshal text: %v", err)
+	}
+	if parsed.Path != "main.go" || parsed.Depth != 3 {
+		t.Errorf("parsed = %+v", parsed)
 	}
 }
 
 func TestTypedTool_ExecuteOmittedOptional(t *testing.T) {
-	tt := typed.New[analyzeInput]("analyze", "Analyze", func(_ context.Context, in analyzeInput) (string, error) {
-		return fmt.Sprintf("depth=%d", in.Depth), nil
+	tt := typed.New("analyze", "Analyze", func(_ context.Context, in analyzeInput) (analyzeOutput, error) {
+		return analyzeOutput{Depth: in.Depth}, nil
 	})
 
 	result, err := tt.Execute(context.Background(), json.RawMessage(`{"path":"main.go"}`))
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if result != "depth=0" {
-		t.Errorf("result = %q, want depth=0 (zero value for omitted field)", result)
+
+	var parsed analyzeOutput
+	if err := json.Unmarshal([]byte(result.Text()), &parsed); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if parsed.Depth != 0 {
+		t.Errorf("depth = %d, want 0 (zero value for omitted field)", parsed.Depth)
 	}
 }
 
 func TestTypedTool_ExecuteInvalidInput(t *testing.T) {
-	tt := typed.New[analyzeInput]("analyze", "Analyze", func(_ context.Context, _ analyzeInput) (string, error) {
-		return "", nil
+	tt := typed.New("analyze", "Analyze", func(_ context.Context, _ analyzeInput) (analyzeOutput, error) {
+		return analyzeOutput{}, nil
 	})
 
 	_, err := tt.Execute(context.Background(), json.RawMessage(`not json`))
@@ -102,22 +119,27 @@ func TestTypedTool_ExecuteInvalidInput(t *testing.T) {
 }
 
 func TestTypedTool_ExecuteEmptyInput(t *testing.T) {
-	tt := typed.New[analyzeInput]("analyze", "Analyze", func(_ context.Context, in analyzeInput) (string, error) {
-		return fmt.Sprintf("path=%s", in.Path), nil
+	tt := typed.New("analyze", "Analyze", func(_ context.Context, in analyzeInput) (analyzeOutput, error) {
+		return analyzeOutput{Path: in.Path}, nil
 	})
 
 	result, err := tt.Execute(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("Execute with nil input: %v", err)
 	}
-	if result != "path=" {
-		t.Errorf("result = %q, want path= (zero value)", result)
+
+	var parsed analyzeOutput
+	if err := json.Unmarshal([]byte(result.Text()), &parsed); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if parsed.Path != "" {
+		t.Errorf("path = %q, want empty (zero value)", parsed.Path)
 	}
 }
 
 func TestTypedTool_Name(t *testing.T) {
-	tt := typed.New[analyzeInput]("my-tool", "desc", func(_ context.Context, _ analyzeInput) (string, error) {
-		return "", nil
+	tt := typed.New("my-tool", "desc", func(_ context.Context, _ analyzeInput) (analyzeOutput, error) {
+		return analyzeOutput{}, nil
 	})
 	if tt.Name() != "my-tool" {
 		t.Errorf("Name() = %q", tt.Name())
@@ -127,9 +149,28 @@ func TestTypedTool_Name(t *testing.T) {
 	}
 }
 
+func TestTypedTool_OutputSchema(t *testing.T) {
+	tt := typed.New("analyze", "Analyze", func(_ context.Context, _ analyzeInput) (analyzeOutput, error) {
+		return analyzeOutput{}, nil
+	})
+
+	schema := tt.OutputSchema()
+	if len(schema) == 0 {
+		t.Fatal("OutputSchema is empty")
+	}
+
+	var parsed map[string]any
+	if err := json.Unmarshal(schema, &parsed); err != nil {
+		t.Fatalf("OutputSchema is not valid JSON: %v", err)
+	}
+	if parsed["type"] != "object" {
+		t.Errorf("OutputSchema type = %v, want object", parsed["type"])
+	}
+}
+
 func TestTypedTool_RegisterInRegistry(t *testing.T) {
-	tt := typed.New[analyzeInput]("analyze", "Analyze code", func(_ context.Context, in analyzeInput) (string, error) {
-		return "ok:" + in.Path, nil
+	tt := typed.New("analyze", "Analyze code", func(_ context.Context, in analyzeInput) (analyzeOutput, error) {
+		return analyzeOutput{Path: in.Path, Depth: 42}, nil
 	})
 
 	reg := tool.NewRegistry()
@@ -139,7 +180,12 @@ func TestTypedTool_RegisterInRegistry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if result != "ok:test.go" {
-		t.Errorf("result = %q", result)
+
+	var parsed analyzeOutput
+	if err := json.Unmarshal([]byte(result.Text()), &parsed); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if parsed.Path != "test.go" || parsed.Depth != 42 {
+		t.Errorf("parsed = %+v", parsed)
 	}
 }

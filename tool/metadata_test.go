@@ -51,6 +51,6 @@ func (stubPlainTool) Name() string                 { return "plain" }
 func (stubPlainTool) Description() string          { return "" }
 func (stubPlainTool) InputSchema() json.RawMessage { return nil }
 
-func (stubPlainTool) Execute(_ context.Context, _ json.RawMessage) (string, error) {
-	return "", nil
+func (stubPlainTool) Execute(_ context.Context, _ json.RawMessage) (tool.Result, error) {
+	return tool.Result{}, nil
 }

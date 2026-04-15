@@ -58,8 +58,8 @@ func TestMCPAdapter_RegisterDiscoverExecute(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if result != "stub:analysis" {
-		t.Errorf("result = %q, want %q", result, "stub:analysis")
+	if result.Text() != "stub:analysis" {
+		t.Errorf("result = %q, want %q", result.Text(), "stub:analysis")
 	}
 
 	// Unregister and verify tools are removed.
@@ -104,8 +104,8 @@ func TestMCPAdapter_ClearanceFilters(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute allowed: %v", err)
 	}
-	if result != "stub:analysis" {
-		t.Errorf("result = %q", result)
+	if result.Text() != "stub:analysis" {
+		t.Errorf("result = %q", result.Text())
 	}
 
 	// Denied tool rejected.

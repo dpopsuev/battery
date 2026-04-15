@@ -40,13 +40,13 @@ func (r *Registry) Get(name string) (Tool, error) {
 
 // Execute dispatches a tool call by name.
 // Returns ErrNotFound if the tool is not registered or not available.
-func (r *Registry) Execute(ctx context.Context, name string, input json.RawMessage) (string, error) {
+func (r *Registry) Execute(ctx context.Context, name string, input json.RawMessage) (Result, error) {
 	t, err := r.Get(name)
 	if err != nil {
-		return "", err
+		return Result{}, err
 	}
 	if !isAvailable(t) {
-		return "", fmt.Errorf("%w: %s", ErrNotFound, name)
+		return Result{}, fmt.Errorf("%w: %s", ErrNotFound, name)
 	}
 	return t.Execute(ctx, input)
 }

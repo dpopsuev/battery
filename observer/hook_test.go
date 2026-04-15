@@ -11,6 +11,9 @@ import (
 	"github.com/dpopsuev/battery/tool"
 )
 
+// tr is a shorthand for tool.TextResult in tests.
+func tr(s string) tool.Result { return tool.TextResult(s) }
+
 // HookContract validates any Hook implementation.
 func HookContract(t *testing.T, newHook func() observer.Hook) {
 	t.Helper()
@@ -22,12 +25,12 @@ func HookContract(t *testing.T, newHook func() observer.Hook) {
 
 	t.Run("OnToolResult_Success", func(t *testing.T) {
 		h := newHook()
-		h.OnToolResult(context.Background(), "read", "file contents", nil, 50*time.Millisecond)
+		h.OnToolResult(context.Background(), "read", tr("file contents"), nil, 50*time.Millisecond)
 	})
 
 	t.Run("OnToolResult_Error", func(t *testing.T) {
 		h := newHook()
-		h.OnToolResult(context.Background(), "read", "", errors.New("not found"), 10*time.Millisecond)
+		h.OnToolResult(context.Background(), "read", tool.Result{}, errors.New("not found"), 10*time.Millisecond)
 	})
 
 	t.Run("OnGaugeMeasurement", func(t *testing.T) {
@@ -35,6 +38,16 @@ func HookContract(t *testing.T, newHook func() observer.Hook) {
 		h.OnGaugeMeasurement(context.Background(), "read", []tool.Measurement{
 			{Name: "bytes", Value: 1024, Unit: "bytes"},
 		})
+	})
+
+	t.Run("OnCacheHit", func(t *testing.T) {
+		h := newHook()
+		h.OnCacheHit(context.Background(), "read", "cache-key-1")
+	})
+
+	t.Run("OnCacheMiss", func(t *testing.T) {
+		h := newHook()
+		h.OnCacheMiss(context.Background(), "read", "cache-key-2")
 	})
 }
 
@@ -50,7 +63,7 @@ func TestRingHook(t *testing.T) {
 	h := observer.NewRingHook(ring2)
 
 	h.OnToolCall(context.Background(), "analyze", json.RawMessage(`{}`))
-	h.OnToolResult(context.Background(), "analyze", "done", nil, 100*time.Millisecond)
+	h.OnToolResult(context.Background(), "analyze", tr("done"), nil, 100*time.Millisecond)
 
 	events := ring2.Last(10)
 	if len(events) != 2 {
@@ -107,7 +120,7 @@ func TestRingHook_Error(t *testing.T) {
 	ring := observer.NewRing(100)
 	h := observer.NewRingHook(ring)
 
-	h.OnToolResult(context.Background(), "lint", "", errors.New("parse error"), 5*time.Millisecond)
+	h.OnToolResult(context.Background(), "lint", tool.Result{}, errors.New("parse error"), 5*time.Millisecond)
 
 	events := ring.Last(1)
 	if len(events) != 1 {
@@ -124,7 +137,7 @@ func TestMultiHook(t *testing.T) {
 	multi := observer.NewMultiHook(observer.NewRingHook(ring1), observer.NewRingHook(ring2))
 
 	multi.OnToolCall(context.Background(), "read", json.RawMessage(`{}`))
-	multi.OnToolResult(context.Background(), "read", "ok", nil, 10*time.Millisecond)
+	multi.OnToolResult(context.Background(), "read", tr("ok"), nil, 10*time.Millisecond)
 
 	for i, ring := range []*observer.Ring{ring1, ring2} {
 		events := ring.Last(10)

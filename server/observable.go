@@ -3,9 +3,10 @@ package server
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"time"
+
+	"github.com/dpopsuev/battery/tool"
 )
 
 // Log attribute keys for observable tool calls.
@@ -17,7 +18,7 @@ const (
 
 // Observable wraps a Handler with timing and error logging.
 func Observable(name string, h Handler) Handler {
-	return func(ctx context.Context, input json.RawMessage) (string, error) {
+	return func(ctx context.Context, input json.RawMessage) (tool.Result, error) {
 		start := time.Now()
 		result, err := h(ctx, input)
 		elapsed := time.Since(start)
@@ -38,14 +39,8 @@ func Observable(name string, h Handler) Handler {
 	}
 }
 
-// TextResult wraps a string as a result.
-func TextResult(s string) string { return s }
+// TextResult creates a Result with a single TextContent block.
+func TextResult(s string) tool.Result { return tool.TextResult(s) }
 
-// JSONResult marshals data as a JSON string result.
-func JSONResult(data any) (string, error) {
-	b, err := json.Marshal(data)
-	if err != nil {
-		return "", fmt.Errorf("battery: json result: %w", err)
-	}
-	return string(b), nil
-}
+// JSONResult creates a Result with StructuredContent and a text fallback.
+func JSONResult(data any) (tool.Result, error) { return tool.StructuredResult(data) }

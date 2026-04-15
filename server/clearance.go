@@ -33,9 +33,9 @@ func NewClearance(executor tool.Executor, allowedTools []string) *Clearance {
 }
 
 // Execute runs a tool if it's in the allowlist.
-func (c *Clearance) Execute(ctx context.Context, name string, input json.RawMessage) (string, error) {
+func (c *Clearance) Execute(ctx context.Context, name string, input json.RawMessage) (tool.Result, error) {
 	if len(c.allowed) > 0 && !c.allowed[name] {
-		return "", ErrToolNotAllowed
+		return tool.Result{}, ErrToolNotAllowed
 	}
 	return c.executor.Execute(ctx, name, input)
 }

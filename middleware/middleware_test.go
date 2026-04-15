@@ -44,8 +44,8 @@ func TestEnvelope_GateAllows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result != "content" {
-		t.Errorf("result = %q, want content", result)
+	if result.Text() != "content" {
+		t.Errorf("result = %q, want content", result.Text())
 	}
 }
 
@@ -68,8 +68,8 @@ func TestEnvelope_EnricherAppends(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result != "file data\n\nsymbols: 42" {
-		t.Errorf("result = %q, want enriched output", result)
+	if result.Text() != "file data\nsymbols: 42" {
+		t.Errorf("result = %q, want enriched output", result.Text())
 	}
 	if enricher.Calls != 1 {
 		t.Errorf("enricher.Calls = %d, want 1", enricher.Calls)
@@ -248,15 +248,16 @@ func TestEnvelope_MaxResultSize_Truncates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result) <= 10 {
+	text := result.Text()
+	if len(text) <= 10 {
 		// Should have truncated content + marker.
-		t.Errorf("expected truncated output longer than 10 due to marker, got %d", len(result))
+		t.Errorf("expected truncated output longer than 10 due to marker, got %d", len(text))
 	}
-	if result[:10] != "a]very lon" {
-		t.Errorf("truncated prefix = %q", result[:10])
+	if text[:10] != "a]very lon" {
+		t.Errorf("truncated prefix = %q", text[:10])
 	}
-	if !strings.Contains(result, "[battery: output truncated") {
-		t.Errorf("missing truncation marker in: %q", result)
+	if !strings.Contains(text, "[battery: output truncated") {
+		t.Errorf("missing truncation marker in: %q", text)
 	}
 }
 
@@ -278,8 +279,8 @@ func TestEnvelope_MaxResultSize_NoTruncateUnderLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result != "short" {
-		t.Errorf("result = %q, want short (no truncation)", result)
+	if result.Text() != "short" {
+		t.Errorf("result = %q, want short (no truncation)", result.Text())
 	}
 }
 
@@ -304,10 +305,11 @@ func TestEnvelope_MaxResultSize_PerToolOverride(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result[:5] != "01234" {
-		t.Errorf("truncated at per-tool limit: prefix = %q", result[:5])
+	text2 := result.Text()
+	if text2[:5] != "01234" {
+		t.Errorf("truncated at per-tool limit: prefix = %q", text2[:5])
 	}
-	if !strings.Contains(result, "[battery: output truncated") {
-		t.Errorf("missing truncation marker: %q", result)
+	if !strings.Contains(text2, "[battery: output truncated") {
+		t.Errorf("missing truncation marker: %q", text2)
 	}
 }

@@ -58,7 +58,7 @@ func (w *Workbench) Swap(rule SwapRule) *Workbench {
 
 // Execute dispatches a tool call. Checks pipes first, then swaps, then
 // crafted tools, then mounted sources in order.
-func (w *Workbench) Execute(ctx context.Context, name string, input json.RawMessage) (string, error) {
+func (w *Workbench) Execute(ctx context.Context, name string, input json.RawMessage) (tool.Result, error) {
 	// Pipeline execution.
 	if steps, ok := w.pipes[name]; ok {
 		return w.executePipe(ctx, steps, input)
@@ -67,7 +67,7 @@ func (w *Workbench) Execute(ctx context.Context, name string, input json.RawMess
 	// Resolve the tool (swap-aware).
 	t, err := w.resolve(name)
 	if err != nil {
-		return "", err
+		return tool.Result{}, err
 	}
 	return t.Execute(ctx, input)
 }
@@ -161,30 +161,24 @@ func (w *Workbench) resolve(name string) (tool.Tool, error) {
 }
 
 // executePipe runs a pipeline: output of step N → input of step N+1.
-func (w *Workbench) executePipe(ctx context.Context, steps []string, input json.RawMessage) (string, error) {
+// The text output of step N becomes {"input":"<text>"} for step N+1.
+func (w *Workbench) executePipe(ctx context.Context, steps []string, input json.RawMessage) (tool.Result, error) {
 	current := input
+	var lastResult tool.Result
 	for i, step := range steps {
 		t, err := w.resolve(step)
 		if err != nil {
-			return "", fmt.Errorf("pipe step %d (%s): %w", i, step, err)
+			return tool.Result{}, fmt.Errorf("pipe step %d (%s): %w", i, step, err)
 		}
-		output, err := t.Execute(ctx, current)
+		lastResult, err = t.Execute(ctx, current)
 		if err != nil {
-			return "", fmt.Errorf("pipe step %d (%s): %w", i, step, err)
+			return tool.Result{}, fmt.Errorf("pipe step %d (%s): %w", i, step, err)
 		}
-		// Wrap output as input for next step.
-		current, err = json.Marshal(map[string]string{"input": output})
+		// Wrap text output as input for next step.
+		current, err = json.Marshal(map[string]string{"input": lastResult.Text()})
 		if err != nil {
-			return "", fmt.Errorf("pipe step %d (%s): marshal: %w", i, step, err)
+			return tool.Result{}, fmt.Errorf("pipe step %d (%s): marshal: %w", i, step, err)
 		}
 	}
-
-	// Return the final output string (unwrapped).
-	var final struct {
-		Input string `json:"input"`
-	}
-	if err := json.Unmarshal(current, &final); err != nil {
-		return string(current), nil
-	}
-	return final.Input, nil
+	return lastResult, nil
 }

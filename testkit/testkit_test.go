@@ -19,8 +19,8 @@ func TestStubTool_Execute(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result != "file contents" {
-		t.Errorf("result = %q, want file contents", result)
+	if result.Text() != "file contents" {
+		t.Errorf("result = %q, want file contents", result.Text())
 	}
 	if s.Calls != 1 {
 		t.Errorf("Calls = %d, want 1", s.Calls)
@@ -41,8 +41,8 @@ func TestStubExecutor_Dispatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result != "ok" {
-		t.Errorf("result = %q, want ok", result)
+	if result.Text() != "ok" {
+		t.Errorf("result = %q, want ok", result.Text())
 	}
 	if len(exec.Calls) != 1 {
 		t.Fatalf("Calls = %d, want 1", len(exec.Calls))
@@ -137,7 +137,7 @@ func TestStubRecorder(t *testing.T) {
 	t.Parallel()
 	r := &testkit.StubRecorder{}
 
-	r.Record(context.Background(), "read", nil, "output", nil, 0)
+	r.Record(context.Background(), "read", nil, tool.TextResult("output"), nil, 0)
 	if len(r.Records) != 1 {
 		t.Fatalf("Records = %d, want 1", len(r.Records))
 	}

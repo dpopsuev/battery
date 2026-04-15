@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 
 	"github.com/dpopsuev/battery/tool"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -25,38 +24,54 @@ func (t *mcpTool) Name() string                 { return t.serverName + "." + t.
 func (t *mcpTool) Description() string          { return t.description }
 func (t *mcpTool) InputSchema() json.RawMessage { return t.schema }
 
-func (t *mcpTool) Execute(ctx context.Context, input json.RawMessage) (string, error) {
-	// Convert json.RawMessage to the any type expected by CallToolParams.Arguments.
+func (t *mcpTool) Execute(ctx context.Context, input json.RawMessage) (tool.Result, error) {
 	var args any
 	if len(input) > 0 {
 		if err := json.Unmarshal(input, &args); err != nil {
-			return "", fmt.Errorf("mcp tool %s: unmarshal input: %w", t.Name(), err)
+			return tool.Result{}, fmt.Errorf("mcp tool %s: unmarshal input: %w", t.Name(), err)
 		}
 	}
 
-	result, err := t.session.CallTool(ctx, &sdkmcp.CallToolParams{
+	sdkResult, err := t.session.CallTool(ctx, &sdkmcp.CallToolParams{
 		Name:      t.name,
 		Arguments: args,
 	})
 	if err != nil {
-		return "", fmt.Errorf("mcp tool %s: call: %w", t.Name(), err)
+		return tool.Result{}, fmt.Errorf("mcp tool %s: call: %w", t.Name(), err)
 	}
 
-	if result.IsError {
-		text := extractText(result)
-		return "", fmt.Errorf("%w: %s: %s", ErrMCPToolError, t.Name(), text)
-	}
-
-	return extractText(result), nil
+	return convertResult(sdkResult), nil
 }
 
-// extractText concatenates all TextContent blocks from a CallToolResult.
-func extractText(result *sdkmcp.CallToolResult) string {
-	var parts []string
-	for _, c := range result.Content {
-		if tc, ok := c.(*sdkmcp.TextContent); ok {
-			parts = append(parts, tc.Text)
+// convertResult translates an MCP CallToolResult to a Battery tool.Result,
+// preserving all content types and structured content.
+func convertResult(sdk *sdkmcp.CallToolResult) tool.Result {
+	r := tool.Result{
+		IsError:           sdk.IsError,
+		StructuredContent: sdk.StructuredContent,
+	}
+
+	for _, c := range sdk.Content {
+		switch v := c.(type) {
+		case *sdkmcp.TextContent:
+			r.Content = append(r.Content, tool.TextContent{Text: v.Text})
+		case *sdkmcp.ImageContent:
+			r.Content = append(r.Content, tool.ImageContent{MIMEType: v.MIMEType, Data: v.Data})
+		case *sdkmcp.AudioContent:
+			r.Content = append(r.Content, tool.AudioContent{MIMEType: v.MIMEType, Data: v.Data})
+		case *sdkmcp.ResourceLink:
+			r.Content = append(r.Content, tool.ResourceLink{
+				URI: v.URI, Name: v.Name, Description: v.Description, MIMEType: v.MIMEType,
+			})
+		case *sdkmcp.EmbeddedResource:
+			if v.Resource != nil {
+				r.Content = append(r.Content, tool.ResourceContent{
+					URI: v.Resource.URI, MIMEType: v.Resource.MIMEType,
+					Text: v.Resource.Text, Blob: v.Resource.Blob,
+				})
+			}
 		}
 	}
-	return strings.Join(parts, "\n")
+
+	return r
 }

@@ -10,6 +10,7 @@ import (
 
 	"github.com/dpopsuev/battery/mcpserver"
 	"github.com/dpopsuev/battery/server"
+	"github.com/dpopsuev/battery/tool"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -48,18 +49,18 @@ func TestServer_ToolRegistration(t *testing.T) {
 		Tool(server.ToolMeta{
 			Name:        "echo",
 			Description: "Echo the input",
-		}, func(_ context.Context, input json.RawMessage) (string, error) {
-			return string(input), nil
+		}, func(_ context.Context, input json.RawMessage) (tool.Result, error) {
+			return tool.TextResult(string(input)), nil
 		}).
 		Tool(server.ToolMeta{
 			Name:        "greet",
 			Description: "Greet a person",
-		}, func(_ context.Context, input json.RawMessage) (string, error) {
+		}, func(_ context.Context, input json.RawMessage) (tool.Result, error) {
 			var args struct {
 				Name string `json:"name"`
 			}
 			json.Unmarshal(input, &args)
-			return "Hello, " + args.Name, nil
+			return tool.TextResult("Hello, " + args.Name), nil
 		})
 
 	session := connectClient(t, srv)
@@ -90,12 +91,12 @@ func TestServer_ToolExecution(t *testing.T) {
 		Tool(server.ToolMeta{
 			Name:        "greet",
 			Description: "Greet a person",
-		}, func(_ context.Context, input json.RawMessage) (string, error) {
+		}, func(_ context.Context, input json.RawMessage) (tool.Result, error) {
 			var args struct {
 				Name string `json:"name"`
 			}
 			json.Unmarshal(input, &args)
-			return "Hello, " + args.Name, nil
+			return tool.TextResult("Hello, " + args.Name), nil
 		})
 
 	session := connectClient(t, srv)
@@ -194,8 +195,8 @@ func TestServer_AutoObservable(t *testing.T) {
 		Tool(server.ToolMeta{
 			Name:        "ping",
 			Description: "Ping",
-		}, func(_ context.Context, _ json.RawMessage) (string, error) {
-			return "pong", nil
+		}, func(_ context.Context, _ json.RawMessage) (tool.Result, error) {
+			return tool.TextResult("pong"), nil
 		})
 
 	session := connectClient(t, srv)
@@ -222,7 +223,7 @@ func TestServer_PanicRecovery(t *testing.T) {
 		Tool(server.ToolMeta{
 			Name:        "boom",
 			Description: "Panics on every call",
-		}, func(_ context.Context, _ json.RawMessage) (string, error) {
+		}, func(_ context.Context, _ json.RawMessage) (tool.Result, error) {
 			panic("kaboom")
 		})
 
@@ -257,10 +258,10 @@ func TestServer_ContextCancellation(t *testing.T) {
 		Tool(server.ToolMeta{
 			Name:        "slow",
 			Description: "Blocks until context canceled",
-		}, func(ctx context.Context, _ json.RawMessage) (string, error) {
+		}, func(ctx context.Context, _ json.RawMessage) (tool.Result, error) {
 			close(handlerCalled)
 			<-ctx.Done()
-			return "", ctx.Err()
+			return tool.Result{}, ctx.Err()
 		})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -305,8 +306,8 @@ func TestServer_GracefulShutdown(t *testing.T) {
 		Tool(server.ToolMeta{
 			Name:        "ping",
 			Description: "Ping",
-		}, func(_ context.Context, _ json.RawMessage) (string, error) {
-			return "pong", nil
+		}, func(_ context.Context, _ json.RawMessage) (tool.Result, error) {
+			return tool.TextResult("pong"), nil
 		})
 
 	ctx, cancel := context.WithCancel(context.Background())

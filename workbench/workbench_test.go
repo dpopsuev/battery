@@ -23,8 +23,8 @@ func TestWorkbench_Craft(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result != "file contents" {
-		t.Errorf("result = %q", result)
+	if result.Text() != "file contents" {
+		t.Errorf("result = %q", result.Text())
 	}
 }
 
@@ -41,8 +41,8 @@ func TestWorkbench_Mount(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result != "analysis" {
-		t.Errorf("result = %q", result)
+	if result.Text() != "analysis" {
+		t.Errorf("result = %q", result.Text())
 	}
 }
 
@@ -87,8 +87,8 @@ func TestWorkbench_Pipe(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The final output is the last step's result.
-	if result != "PREFIX:HELLO" {
-		t.Errorf("pipe result = %q, want PREFIX:HELLO", result)
+	if result.Text() != "PREFIX:HELLO" {
+		t.Errorf("pipe result = %q, want PREFIX:HELLO", result.Text())
 	}
 }
 
@@ -120,8 +120,8 @@ func TestWorkbench_Swap_Primary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result != "primary-result" {
-		t.Errorf("result = %q, want primary-result", result)
+	if result.Text() != "primary-result" {
+		t.Errorf("result = %q, want primary-result", result.Text())
 	}
 }
 
@@ -143,8 +143,8 @@ func TestWorkbench_Swap_Fallback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result != "fallback-result" {
-		t.Errorf("result = %q, want fallback-result", result)
+	if result.Text() != "fallback-result" {
+		t.Errorf("result = %q, want fallback-result", result.Text())
 	}
 }
 

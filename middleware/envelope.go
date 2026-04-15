@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/dpopsuev/battery/tool"
@@ -28,24 +27,24 @@ type Envelope struct {
 var _ tool.Executor = (*Envelope)(nil)
 
 // Execute runs the full pipeline: check gates → enrich → execute → record.
-func (e *Envelope) Execute(ctx context.Context, name string, input json.RawMessage) (string, error) {
+func (e *Envelope) Execute(ctx context.Context, name string, input json.RawMessage) (tool.Result, error) {
 	// Gates.
 	for _, g := range e.gates {
 		v, err := g.Check(ctx, name, input)
 		if err != nil {
-			return "", fmt.Errorf("%w: gate error: %w", ErrToolDenied, err)
+			return tool.Result{}, fmt.Errorf("%w: gate error: %w", ErrToolDenied, err)
 		}
 		if !v.Allowed {
-			return "", fmt.Errorf("%w: %s", ErrToolDenied, v.Reason)
+			return tool.Result{}, fmt.Errorf("%w: %s", ErrToolDenied, v.Reason)
 		}
 	}
 
-	// Enrichers (non-fatal, append to output on success).
-	var enrichments []string
+	// Enrichers (non-fatal, append as additional TextContent blocks).
+	var enrichments []tool.Content
 	for _, en := range e.enrichers {
 		result, err := en.Enrich(ctx, name, input)
 		if err == nil && result != "" {
-			enrichments = append(enrichments, result)
+			enrichments = append(enrichments, tool.TextContent{Text: result})
 		}
 	}
 
@@ -54,14 +53,14 @@ func (e *Envelope) Execute(ctx context.Context, name string, input json.RawMessa
 	output, execErr := e.executor.Execute(ctx, name, input)
 	elapsed := time.Since(start)
 
-	// Append enrichments to output on success.
+	// Append enrichments to result on success.
 	if execErr == nil && len(enrichments) > 0 {
-		output = output + "\n\n" + strings.Join(enrichments, "\n")
+		output.Content = append(output.Content, enrichments...)
 	}
 
-	// Truncate output if MaxResultSize is configured.
+	// Truncate text output if MaxResultSize is configured.
 	if execErr == nil {
-		output = e.truncateOutput(name, output)
+		output = e.truncateResult(name, output)
 	}
 
 	// Gauge (optional, non-blocking, errors swallowed).
@@ -87,8 +86,9 @@ func (e *Envelope) All() []tool.Tool { return e.executor.All() }
 // Names delegates to the wrapped executor.
 func (e *Envelope) Names() []string { return e.executor.Names() }
 
-// truncateOutput applies per-tool or default MaxResultSize truncation.
-func (e *Envelope) truncateOutput(name, output string) string {
+// truncateResult applies per-tool or default MaxResultSize truncation to text content.
+// StructuredContent is preserved — only Text() output is truncated.
+func (e *Envelope) truncateResult(name string, r tool.Result) tool.Result {
 	limit := e.maxResultDefault
 
 	// Check per-tool override via ToolMetadata.
@@ -103,10 +103,26 @@ func (e *Envelope) truncateOutput(name, output string) string {
 		}
 	}
 
-	if limit > 0 && len(output) > limit {
-		return output[:limit] + fmt.Sprintf("\n[battery: output truncated, %d bytes of %d limit]", len(output), limit)
+	if limit <= 0 {
+		return r
 	}
-	return output
+
+	text := r.Text()
+	if len(text) <= limit {
+		return r
+	}
+
+	// Replace all TextContent blocks with a single truncated block.
+	truncated := text[:limit] + fmt.Sprintf("\n[battery: output truncated, %d bytes of %d limit]", len(text), limit)
+	var kept []tool.Content
+	for _, c := range r.Content {
+		if _, ok := c.(tool.TextContent); !ok {
+			kept = append(kept, c)
+		}
+	}
+	kept = append(kept, tool.TextContent{Text: truncated})
+	r.Content = kept
+	return r
 }
 
 // collectGauge checks if the executed tool implements Gauged and fires gaugeFunc.

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"testing"
 	"time"
 
@@ -44,8 +43,8 @@ func TestE2E_StubPipeline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result != "file contents here" {
-		t.Errorf("read result = %q, want file contents here", result)
+	if result.Text() != "file contents here" {
+		t.Errorf("read result = %q, want file contents here", result.Text())
 	}
 
 	// 4. Verify the call was recorded.
@@ -107,7 +106,7 @@ func TestE2E_GateEnrichRecord(t *testing.T) {
 
 	// Recorder: records the execution.
 	recorder := &testkit.StubRecorder{}
-	recorder.Record(ctx, "read", nil, result, nil, 0)
+	recorder.Record(ctx, "read", nil, result, nil, 0) // result is already tool.Result
 
 	// Verify all stubs recorded their calls.
 	if gate.Calls != 1 {
@@ -138,18 +137,18 @@ func TestE2E_MCPClientServerRoundTrip(t *testing.T) {
 			Name:        "analyze",
 			Description: "Analyze code quality",
 			Keywords:    []string{"code", "quality"},
-		}, func(_ context.Context, input json.RawMessage) (string, error) {
+		}, func(_ context.Context, input json.RawMessage) (tool.Result, error) {
 			var args struct {
 				Path string `json:"path"`
 			}
 			json.Unmarshal(input, &args)
-			return `{"score":95,"path":"` + args.Path + `"}`, nil
+			return tool.TextResult(`{"score":95,"path":"` + args.Path + `"}`), nil
 		}).
 		Tool(server.ToolMeta{
 			Name:        "lint",
 			Description: "Run linter",
-		}, func(_ context.Context, _ json.RawMessage) (string, error) {
-			return `{"issues":0}`, nil
+		}, func(_ context.Context, _ json.RawMessage) (tool.Result, error) {
+			return tool.TextResult(`{"issues":0}`), nil
 		})
 
 	// 2. Connect via in-memory transport.
@@ -182,8 +181,8 @@ func TestE2E_MCPClientServerRoundTrip(t *testing.T) {
 		Score int    `json:"score"`
 		Path  string `json:"path"`
 	}
-	if err := json.Unmarshal([]byte(result), &parsed); err != nil {
-		t.Fatalf("unmarshal result: %v (raw: %q)", err, result)
+	if err := json.Unmarshal([]byte(result.Text()), &parsed); err != nil {
+		t.Fatalf("unmarshal result: %v (raw: %q)", err, result.Text())
 	}
 	if parsed.Score != 95 || parsed.Path != "main.go" {
 		t.Errorf("result = %+v", parsed)
@@ -218,12 +217,12 @@ func TestE2E_ObserverCacheRoundTrip(t *testing.T) {
 
 	// 1. Build MCP server with a tool.
 	srv := mcpserver.NewServer("data-svc", "v1.0.0").
-		Tool(server.ToolMeta{Name: "fetch", Description: "Fetch data"}, func(_ context.Context, input json.RawMessage) (string, error) {
+		Tool(server.ToolMeta{Name: "fetch", Description: "Fetch data"}, func(_ context.Context, input json.RawMessage) (tool.Result, error) {
 			var args struct {
 				ID string `json:"id"`
 			}
 			json.Unmarshal(input, &args)
-			return `{"result":"data-` + args.ID + `"}`, nil
+			return tool.TextResult(`{"result":"data-` + args.ID + `"}`), nil
 		})
 
 	serverTransport, clientTransport := sdkmcp.NewInMemoryTransports()
@@ -256,7 +255,7 @@ func TestE2E_ObserverCacheRoundTrip(t *testing.T) {
 	}
 
 	// Cache the result.
-	if err := mc.Set(ctx, "data", "fetch:42", []byte(result), 0); err != nil {
+	if err := mc.Set(ctx, "data", "fetch:42", []byte(result.Text()), 0); err != nil {
 		t.Fatalf("Cache Set: %v", err)
 	}
 
@@ -277,8 +276,8 @@ func TestE2E_ObserverCacheRoundTrip(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("expected cache hit, got ok=%v err=%v", ok, err)
 	}
-	if string(cached) != result {
-		t.Errorf("cached = %q, want %q", cached, result)
+	if string(cached) != result.Text() {
+		t.Errorf("cached = %q, want %q", cached, result.Text())
 	}
 
 	// 8. Evict namespace, verify miss.
@@ -399,10 +398,14 @@ func TestE2E_TypedToolOnMCPServer(t *testing.T) {
 		Path  string `json:"path"`
 		Depth int    `json:"depth,omitempty"`
 	}
+	type analyzeOutput struct {
+		Path  string `json:"path"`
+		Depth int    `json:"depth"`
+	}
 
-	// 1. Create TypedTool with auto-derived schema.
-	tt := typed.New("analyze", "Analyze code", func(_ context.Context, in analyzeInput) (string, error) {
-		return fmt.Sprintf(`{"path":%q,"depth":%d}`, in.Path, in.Depth), nil
+	// 1. Create TypedTool[In, Out] with auto-derived schemas.
+	tt := typed.New("analyze", "Analyze code", func(_ context.Context, in analyzeInput) (analyzeOutput, error) {
+		return analyzeOutput(in), nil
 	})
 
 	// 2. Register on MCP server using the tool's own schema.
@@ -410,7 +413,7 @@ func TestE2E_TypedToolOnMCPServer(t *testing.T) {
 		ToolWithSchema(
 			server.ToolMeta{Name: tt.Name(), Description: tt.Description()},
 			tt.InputSchema(),
-			func(ctx context.Context, input json.RawMessage) (string, error) {
+			func(ctx context.Context, input json.RawMessage) (tool.Result, error) {
 				return tt.Execute(ctx, input)
 			},
 		)
@@ -441,8 +444,8 @@ func TestE2E_TypedToolOnMCPServer(t *testing.T) {
 		Path  string `json:"path"`
 		Depth int    `json:"depth"`
 	}
-	if err := json.Unmarshal([]byte(result), &parsed); err != nil {
-		t.Fatalf("unmarshal result: %v (raw: %q)", err, result)
+	if err := json.Unmarshal([]byte(result.Text()), &parsed); err != nil {
+		t.Fatalf("unmarshal result: %v (raw: %q)", err, result.Text())
 	}
 	if parsed.Path != "main.go" || parsed.Depth != 3 {
 		t.Errorf("result = %+v, want {main.go 3}", parsed)
@@ -459,12 +462,12 @@ func TestE2E_Workbench(t *testing.T) {
 
 	// 1. Build MCP server with a tool.
 	srv := mcpserver.NewServer("svc", "v1.0.0").
-		Tool(server.ToolMeta{Name: "analyze", Description: "Analyze"}, func(_ context.Context, input json.RawMessage) (string, error) {
+		Tool(server.ToolMeta{Name: "analyze", Description: "Analyze"}, func(_ context.Context, input json.RawMessage) (tool.Result, error) {
 			var args struct {
 				Path string `json:"path"`
 			}
 			json.Unmarshal(input, &args)
-			return "analyzed:" + args.Path, nil
+			return tool.TextResult("analyzed:" + args.Path), nil
 		})
 
 	serverTransport, clientTransport := sdkmcp.NewInMemoryTransports()
@@ -497,8 +500,8 @@ func TestE2E_Workbench(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute svc.analyze: %v", err)
 	}
-	if result != "analyzed:main.go" {
-		t.Errorf("result = %q", result)
+	if result.Text() != "analyzed:main.go" {
+		t.Errorf("result = %q", result.Text())
 	}
 
 	// 7. Execute builtin through workbench.
@@ -506,8 +509,8 @@ func TestE2E_Workbench(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute format: %v", err)
 	}
-	if result != "formatted" {
-		t.Errorf("format result = %q", result)
+	if result.Text() != "formatted" {
+		t.Errorf("format result = %q", result.Text())
 	}
 
 	// 8. Pipe: chain analyze → format.
@@ -517,8 +520,8 @@ func TestE2E_Workbench(t *testing.T) {
 		t.Fatalf("Execute pipe: %v", err)
 	}
 	// Final result is format tool's output.
-	if result != "formatted" {
-		t.Errorf("pipe result = %q, want formatted", result)
+	if result.Text() != "formatted" {
+		t.Errorf("pipe result = %q, want formatted", result.Text())
 	}
 
 	// 9. Swap: conditional tool selection.
@@ -539,8 +542,8 @@ func TestE2E_Workbench(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result != "fast" {
-		t.Errorf("swap primary: got %q, want fast", result)
+	if result.Text() != "fast" {
+		t.Errorf("swap primary: got %q, want fast", result.Text())
 	}
 
 	usesFast = false
@@ -548,8 +551,8 @@ func TestE2E_Workbench(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result != "slow" {
-		t.Errorf("swap fallback: got %q, want slow", result)
+	if result.Text() != "slow" {
+		t.Errorf("swap fallback: got %q, want slow", result.Text())
 	}
 }
 
@@ -575,8 +578,8 @@ func TestE2E_GaugeBasic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result != "analysis complete" {
-		t.Errorf("result = %q", result)
+	if result.Text() != "analysis complete" {
+		t.Errorf("result = %q", result.Text())
 	}
 
 	// Type-assert Gauged on the tool.
@@ -641,8 +644,8 @@ func TestE2E_GaugeFullChain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result != "done" {
-		t.Errorf("result = %q", result)
+	if result.Text() != "done" {
+		t.Errorf("result = %q", result.Text())
 	}
 
 	// 6. Verify gauge event in Ring.

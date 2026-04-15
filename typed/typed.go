@@ -36,42 +36,54 @@ func SchemaForSafe[T any]() (json.RawMessage, error) {
 }
 
 // TypedTool adapts a typed handler into a tool.Tool.
-// The InputSchema is derived automatically from the In type parameter.
-type TypedTool[In any] struct {
-	name        string
-	description string
-	schema      json.RawMessage
-	handler     func(ctx context.Context, input In) (string, error)
+// InputSchema is derived from In, OutputSchema from Out.
+// The handler returns (Out, error) — Out is automatically marshaled
+// into Result.StructuredContent with a TextContent JSON fallback.
+type TypedTool[In, Out any] struct {
+	name         string
+	description  string
+	inputSchema  json.RawMessage
+	outputSchema json.RawMessage
+	handler      func(ctx context.Context, input In) (Out, error)
 }
 
-var _ tool.Tool = (*TypedTool[struct{}])(nil)
+var _ tool.Tool = (*TypedTool[struct{}, struct{}])(nil)
 
-// New creates a TypedTool with schema derived from In.
-func New[In any](name, description string, handler func(context.Context, In) (string, error)) *TypedTool[In] {
-	return &TypedTool[In]{
-		name:        name,
-		description: description,
-		schema:      SchemaFor[In](),
-		handler:     handler,
+// New creates a TypedTool with schemas derived from In and Out.
+func New[In, Out any](name, description string, handler func(context.Context, In) (Out, error)) *TypedTool[In, Out] {
+	return &TypedTool[In, Out]{
+		name:         name,
+		description:  description,
+		inputSchema:  SchemaFor[In](),
+		outputSchema: SchemaFor[Out](),
+		handler:      handler,
 	}
 }
 
 // Name returns the tool name.
-func (t *TypedTool[In]) Name() string { return t.name }
+func (t *TypedTool[In, Out]) Name() string { return t.name }
 
 // Description returns the tool description.
-func (t *TypedTool[In]) Description() string { return t.description }
+func (t *TypedTool[In, Out]) Description() string { return t.description }
 
 // InputSchema returns the auto-derived JSON Schema for the input type.
-func (t *TypedTool[In]) InputSchema() json.RawMessage { return t.schema }
+func (t *TypedTool[In, Out]) InputSchema() json.RawMessage { return t.inputSchema }
 
-// Execute unmarshals raw JSON into the typed input and calls the handler.
-func (t *TypedTool[In]) Execute(ctx context.Context, input json.RawMessage) (string, error) {
+// OutputSchema returns the auto-derived JSON Schema for the output type.
+func (t *TypedTool[In, Out]) OutputSchema() json.RawMessage { return t.outputSchema }
+
+// Execute unmarshals raw JSON into In, calls the handler, and marshals
+// the Out value into Result.StructuredContent with a TextContent fallback.
+func (t *TypedTool[In, Out]) Execute(ctx context.Context, input json.RawMessage) (tool.Result, error) {
 	var in In
 	if len(input) > 0 {
 		if err := json.Unmarshal(input, &in); err != nil {
-			return "", fmt.Errorf("battery: typed tool %s: unmarshal input: %w", t.name, err)
+			return tool.Result{}, fmt.Errorf("battery: typed tool %s: unmarshal input: %w", t.name, err)
 		}
 	}
-	return t.handler(ctx, in)
+	out, err := t.handler(ctx, in)
+	if err != nil {
+		return tool.Result{}, err
+	}
+	return tool.StructuredResult(out)
 }

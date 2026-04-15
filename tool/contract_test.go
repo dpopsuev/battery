@@ -25,8 +25,8 @@ func ExecutorContract(t *testing.T, newExecutor func(tools ...tool.Tool) tool.Ex
 		if err != nil {
 			t.Fatal(err)
 		}
-		if result != "file contents" {
-			t.Errorf("result = %q, want file contents", result)
+		if result.Text() != "file contents" {
+			t.Errorf("result = %q, want file contents", result.Text())
 		}
 	})
 

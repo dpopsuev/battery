@@ -16,7 +16,7 @@ type StubTool struct {
 	NameVal   string
 	DescVal   string
 	SchemaVal json.RawMessage
-	Result    string
+	Result    string // convenience: used by Execute to build tool.TextResult
 	Err       error
 
 	mu    sync.Mutex
@@ -34,11 +34,14 @@ func (s *StubTool) Name() string                 { return s.NameVal }
 func (s *StubTool) Description() string          { return s.DescVal }
 func (s *StubTool) InputSchema() json.RawMessage { return s.SchemaVal }
 
-func (s *StubTool) Execute(_ context.Context, _ json.RawMessage) (string, error) {
+func (s *StubTool) Execute(_ context.Context, _ json.RawMessage) (tool.Result, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.Calls++
-	return s.Result, s.Err
+	if s.Err != nil {
+		return tool.Result{}, s.Err
+	}
+	return tool.TextResult(s.Result), nil
 }
 
 // StubCapableTool extends StubTool with CapabilityDeclarer.
@@ -85,6 +88,22 @@ var _ tool.Gauged = (*StubGaugedTool)(nil)
 // LastMeasurement returns the configured measurements.
 func (s *StubGaugedTool) LastMeasurement() []tool.Measurement { return s.Measurements }
 
+// StubCacheableTool extends StubTool with Cacheable.
+type StubCacheableTool struct {
+	StubTool
+	KeyFn func(json.RawMessage) (string, bool)
+}
+
+var _ tool.Cacheable = (*StubCacheableTool)(nil)
+
+// CacheKey delegates to the configured function.
+func (s *StubCacheableTool) CacheKey(_ context.Context, input json.RawMessage) (string, bool) {
+	if s.KeyFn == nil {
+		return "", false
+	}
+	return s.KeyFn(input)
+}
+
 // StubExecutor implements tool.Executor. Dispatches to registered StubTools.
 type StubExecutor struct {
 	tools map[string]tool.Tool
@@ -110,14 +129,14 @@ func NewStubExecutor(tools ...tool.Tool) *StubExecutor {
 	return &StubExecutor{tools: m}
 }
 
-func (s *StubExecutor) Execute(ctx context.Context, name string, input json.RawMessage) (string, error) {
+func (s *StubExecutor) Execute(ctx context.Context, name string, input json.RawMessage) (tool.Result, error) {
 	s.mu.Lock()
 	s.Calls = append(s.Calls, StubExecuteCall{Name: name, Input: input})
 	s.mu.Unlock()
 
 	t, ok := s.tools[name]
 	if !ok {
-		return "", tool.ErrNotFound
+		return tool.Result{}, tool.ErrNotFound
 	}
 	return t.Execute(ctx, input)
 }

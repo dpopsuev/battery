@@ -20,13 +20,13 @@ type Tool interface {
 	Name() string
 	Description() string
 	InputSchema() json.RawMessage
-	Execute(ctx context.Context, input json.RawMessage) (string, error)
+	Execute(ctx context.Context, input json.RawMessage) (Result, error)
 }
 
 // Executor dispatches tool calls by name. Registry, Envelope, and
 // Clearance all implement this interface (LSP — substitutable).
 type Executor interface {
-	Execute(ctx context.Context, name string, input json.RawMessage) (string, error)
+	Execute(ctx context.Context, name string, input json.RawMessage) (Result, error)
 	All() []Tool
 	Names() []string
 }

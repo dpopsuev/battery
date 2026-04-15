@@ -5,6 +5,8 @@ package server
 import (
 	"context"
 	"encoding/json"
+
+	"github.com/dpopsuev/battery/tool"
 )
 
 // ToolMeta is enriched metadata beyond tool.Tool — keywords, categories, priority.
@@ -19,10 +21,4 @@ type ToolMeta struct {
 }
 
 // Handler is a server-side tool handler.
-type Handler func(ctx context.Context, input json.RawMessage) (string, error)
-
-// Result wraps a tool execution result.
-type Result struct {
-	Content string `json:"content"`
-	IsError bool   `json:"is_error,omitempty"`
-}
+type Handler func(ctx context.Context, input json.RawMessage) (tool.Result, error)

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/dpopsuev/battery/server"
+	"github.com/dpopsuev/battery/tool"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -178,15 +179,15 @@ func (s *Server) SDK() *sdkmcp.Server {
 }
 
 // adaptHandler bridges server.Handler to sdkmcp.ToolHandler.
-// server.Handler: func(ctx, json.RawMessage) (string, error)
+// server.Handler: func(ctx, json.RawMessage) (tool.Result, error)
 // sdkmcp.ToolHandler: func(ctx, *CallToolRequest) (*CallToolResult, error)
 //
-// Includes panic recovery — a panicking handler returns ErrorResult, not a crash.
+// Includes panic recovery — a panicking handler returns error result, not a crash.
 func adaptHandler(h server.Handler) sdkmcp.ToolHandler {
 	return func(ctx context.Context, req *sdkmcp.CallToolRequest) (res *sdkmcp.CallToolResult, retErr error) {
 		defer func() {
 			if r := recover(); r != nil {
-				res = ErrorResult(fmt.Errorf("%w: %v", ErrHandlerPanicked, r))
+				res = toSDKResult(tool.ErrorResult(fmt.Errorf("%w: %v", ErrHandlerPanicked, r)))
 				retErr = nil
 			}
 		}()
@@ -198,9 +199,9 @@ func adaptHandler(h server.Handler) sdkmcp.ToolHandler {
 
 		result, err := h(ctx, input)
 		if err != nil {
-			return ErrorResult(err), nil
+			return toSDKResult(tool.ErrorResult(err)), nil
 		}
 
-		return TextResult(result), nil
+		return toSDKResult(result), nil
 	}
 }

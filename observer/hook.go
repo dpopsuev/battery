@@ -13,8 +13,10 @@ import (
 // Implementations must be safe for concurrent use.
 type Hook interface {
 	OnToolCall(ctx context.Context, toolName string, input json.RawMessage)
-	OnToolResult(ctx context.Context, toolName string, output string, err error, elapsed time.Duration)
+	OnToolResult(ctx context.Context, toolName string, result tool.Result, err error, elapsed time.Duration)
 	OnGaugeMeasurement(ctx context.Context, toolName string, measurements []tool.Measurement)
+	OnCacheHit(ctx context.Context, toolName, key string)
+	OnCacheMiss(ctx context.Context, toolName, key string)
 }
 
 // RingHook adapts a Ring into a Hook, translating hook calls into Event appends.
@@ -38,7 +40,7 @@ func (h *RingHook) OnToolCall(_ context.Context, toolName string, _ json.RawMess
 }
 
 // OnToolResult records a tool completion event with latency and error status.
-func (h *RingHook) OnToolResult(_ context.Context, toolName, _ string, err error, elapsed time.Duration) {
+func (h *RingHook) OnToolResult(_ context.Context, toolName string, _ tool.Result, err error, elapsed time.Duration) {
 	h.ring.Append(Event{
 		Component: ComponentTool,
 		Action:    "call" + ActionDoneSuffix,
@@ -64,6 +66,26 @@ func (h *RingHook) OnGaugeMeasurement(_ context.Context, toolName string, measur
 	})
 }
 
+// OnCacheHit records a cache hit event.
+func (h *RingHook) OnCacheHit(_ context.Context, toolName, key string) {
+	h.ring.Append(Event{
+		Component: ComponentTool,
+		Action:    "cache_hit",
+		Tool:      toolName,
+		Detail:    key,
+	})
+}
+
+// OnCacheMiss records a cache miss event.
+func (h *RingHook) OnCacheMiss(_ context.Context, toolName, key string) {
+	h.ring.Append(Event{
+		Component: ComponentTool,
+		Action:    "cache_miss",
+		Tool:      toolName,
+		Detail:    key,
+	})
+}
+
 // MultiHook fans out hook calls to multiple Hooks.
 type MultiHook struct {
 	hooks []Hook
@@ -82,9 +104,9 @@ func (m *MultiHook) OnToolCall(ctx context.Context, toolName string, input json.
 }
 
 // OnToolResult forwards to all wrapped hooks.
-func (m *MultiHook) OnToolResult(ctx context.Context, toolName, output string, err error, elapsed time.Duration) {
+func (m *MultiHook) OnToolResult(ctx context.Context, toolName string, result tool.Result, err error, elapsed time.Duration) {
 	for _, h := range m.hooks {
-		h.OnToolResult(ctx, toolName, output, err, elapsed)
+		h.OnToolResult(ctx, toolName, result, err, elapsed)
 	}
 }
 
@@ -92,5 +114,19 @@ func (m *MultiHook) OnToolResult(ctx context.Context, toolName, output string, e
 func (m *MultiHook) OnGaugeMeasurement(ctx context.Context, toolName string, measurements []tool.Measurement) {
 	for _, h := range m.hooks {
 		h.OnGaugeMeasurement(ctx, toolName, measurements)
+	}
+}
+
+// OnCacheHit forwards to all wrapped hooks.
+func (m *MultiHook) OnCacheHit(ctx context.Context, toolName, key string) {
+	for _, h := range m.hooks {
+		h.OnCacheHit(ctx, toolName, key)
+	}
+}
+
+// OnCacheMiss forwards to all wrapped hooks.
+func (m *MultiHook) OnCacheMiss(ctx context.Context, toolName, key string) {
+	for _, h := range m.hooks {
+		h.OnCacheMiss(ctx, toolName, key)
 	}
 }

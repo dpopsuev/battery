@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/dpopsuev/battery/middleware"
+	"github.com/dpopsuev/battery/tool"
 )
 
 // StubGate implements middleware.Gate. Configurable allow/deny.
@@ -64,17 +65,17 @@ type StubRecorder struct {
 type StubRecordEntry struct {
 	Tool    string
 	Input   json.RawMessage
-	Output  string
+	Result  tool.Result
 	Err     error
 	Elapsed time.Duration
 }
 
 var _ middleware.Recorder = (*StubRecorder)(nil)
 
-func (r *StubRecorder) Record(_ context.Context, tool string, input json.RawMessage, output string, err error, elapsed time.Duration) {
+func (r *StubRecorder) Record(_ context.Context, toolName string, input json.RawMessage, result tool.Result, err error, elapsed time.Duration) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.Records = append(r.Records, StubRecordEntry{
-		Tool: tool, Input: input, Output: output, Err: err, Elapsed: elapsed,
+		Tool: toolName, Input: input, Result: result, Err: err, Elapsed: elapsed,
 	})
 }

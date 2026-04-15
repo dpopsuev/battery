@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+
+	"github.com/dpopsuev/battery/tool"
 )
 
 // ErrServerToolNotFound is returned when a tool is not registered in the server registry.
@@ -32,10 +34,10 @@ func (r *Registry) Add(meta ToolMeta, h Handler) {
 }
 
 // Handle dispatches a tool call by name.
-func (r *Registry) Handle(ctx context.Context, name string, input json.RawMessage) (string, error) {
+func (r *Registry) Handle(ctx context.Context, name string, input json.RawMessage) (tool.Result, error) {
 	t, ok := r.tools[name]
 	if !ok {
-		return "", fmt.Errorf("%w: %s", ErrServerToolNotFound, name)
+		return tool.Result{}, fmt.Errorf("%w: %s", ErrServerToolNotFound, name)
 	}
 	return t.handler(ctx, input)
 }
