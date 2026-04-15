@@ -11,9 +11,9 @@ import (
 func TestResult_Text(t *testing.T) {
 	r := tool.Result{
 		Content: []tool.Content{
-			tool.TextContent{Text: "line 1"},
-			tool.ImageContent{MIMEType: "image/png", Data: []byte("img")},
-			tool.TextContent{Text: "line 2"},
+			&tool.TextContent{Text: "line 1"},
+			&tool.ImageContent{MIMEType: "image/png", Data: []byte("img")},
+			&tool.TextContent{Text: "line 2"},
 		},
 	}
 	got := r.Text()
@@ -25,7 +25,7 @@ func TestResult_Text(t *testing.T) {
 func TestResult_TextEmpty(t *testing.T) {
 	r := tool.Result{
 		Content: []tool.Content{
-			tool.ImageContent{MIMEType: "image/png", Data: []byte("img")},
+			&tool.ImageContent{MIMEType: "image/png", Data: []byte("img")},
 		},
 	}
 	if r.Text() != "" {
@@ -51,9 +51,6 @@ func TestTextResult(t *testing.T) {
 	if len(r.Content) != 1 {
 		t.Fatalf("Content len = %d", len(r.Content))
 	}
-	if r.Content[0].ContentType() != "text" {
-		t.Errorf("ContentType = %q", r.Content[0].ContentType())
-	}
 }
 
 func TestErrorResult(t *testing.T) {
@@ -77,11 +74,9 @@ func TestStructuredResult(t *testing.T) {
 	if r.StructuredContent == nil {
 		t.Fatal("StructuredContent is nil")
 	}
-	// TextContent fallback contains JSON.
 	if r.Text() != `{"score":95}` {
 		t.Errorf("Text() = %q", r.Text())
 	}
-	// StructuredContent is json.RawMessage.
 	raw, ok := r.StructuredContent.(json.RawMessage)
 	if !ok {
 		t.Fatalf("StructuredContent type = %T", r.StructuredContent)
@@ -95,20 +90,15 @@ func TestStructuredResult(t *testing.T) {
 	}
 }
 
-func TestContentTypes(t *testing.T) {
-	cases := []struct {
-		content  tool.Content
-		wantType string
-	}{
-		{tool.TextContent{Text: "x"}, "text"},
-		{tool.ImageContent{MIMEType: "image/png"}, "image"},
-		{tool.AudioContent{MIMEType: "audio/wav"}, "audio"},
-		{tool.ResourceLink{URI: "file://x", Name: "x"}, "resource_link"},
-		{tool.ResourceContent{URI: "file://x"}, "resource"},
+func TestResult_ToSDK_RoundTrip(t *testing.T) {
+	r := tool.TextResult("hello")
+	r.StructuredContent = json.RawMessage(`{"x":1}`)
+	sdk := r.ToSDK()
+	r2 := tool.ResultFromSDK(sdk)
+	if r2.Text() != "hello" {
+		t.Errorf("round-trip Text() = %q", r2.Text())
 	}
-	for _, tc := range cases {
-		if got := tc.content.ContentType(); got != tc.wantType {
-			t.Errorf("%T.ContentType() = %q, want %q", tc.content, got, tc.wantType)
-		}
+	if r2.StructuredContent == nil {
+		t.Error("round-trip StructuredContent is nil")
 	}
 }

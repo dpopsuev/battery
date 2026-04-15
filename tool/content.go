@@ -1,55 +1,20 @@
+// Package tool re-exports MCP SDK content types directly.
+// No translation layer — Battery uses the SDK's content model as-is.
 package tool
 
-// Content is a single content block in a tool result.
-// Implementations: TextContent, ImageContent, AudioContent, ResourceLink, ResourceContent.
-type Content interface {
-	ContentType() string
-}
+import sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
-// TextContent holds plain text output.
-type TextContent struct {
-	Text string `json:"text"`
-}
+// Content is the SDK's content interface. Used in Result.Content.
+// Concrete types: *sdkmcp.TextContent, *sdkmcp.ImageContent,
+// *sdkmcp.AudioContent, *sdkmcp.ResourceLink, *sdkmcp.EmbeddedResource.
+type Content = sdkmcp.Content
 
-// ContentType returns "text".
-func (TextContent) ContentType() string { return "text" }
-
-// ImageContent holds base64-encoded image data.
-type ImageContent struct {
-	MIMEType string `json:"mimeType"`
-	Data     []byte `json:"data"`
-}
-
-// ContentType returns "image".
-func (ImageContent) ContentType() string { return "image" }
-
-// AudioContent holds base64-encoded audio data.
-type AudioContent struct {
-	MIMEType string `json:"mimeType"`
-	Data     []byte `json:"data"`
-}
-
-// ContentType returns "audio".
-func (AudioContent) ContentType() string { return "audio" }
-
-// ResourceLink is a reference to an external resource.
-type ResourceLink struct {
-	URI         string `json:"uri"`
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
-	MIMEType    string `json:"mimeType,omitempty"`
-}
-
-// ContentType returns "resource_link".
-func (ResourceLink) ContentType() string { return "resource_link" }
-
-// ResourceContent holds embedded resource data.
-type ResourceContent struct {
-	URI      string `json:"uri"`
-	MIMEType string `json:"mimeType,omitempty"`
-	Text     string `json:"text,omitempty"`
-	Blob     []byte `json:"blob,omitempty"`
-}
-
-// ContentType returns "resource".
-func (ResourceContent) ContentType() string { return "resource" }
+// Re-export SDK content types so consumers import tool/ only.
+type (
+	TextContent      = sdkmcp.TextContent
+	ImageContent     = sdkmcp.ImageContent
+	AudioContent     = sdkmcp.AudioContent
+	ResourceLink     = sdkmcp.ResourceLink
+	EmbeddedResource = sdkmcp.EmbeddedResource
+	ResourceContents = sdkmcp.ResourceContents
+)

@@ -698,7 +698,7 @@ func TestE2E_MCPRoundTripFidelity(t *testing.T) {
 		Tool(server.ToolMeta{Name: "rich", Description: "Rich output"}, func(_ context.Context, _ json.RawMessage) (tool.Result, error) {
 			r, _ := tool.StructuredResult(map[string]any{"score": 95})
 			// Add an image content block alongside the text fallback.
-			r.Content = append(r.Content, tool.ImageContent{MIMEType: "image/png", Data: []byte("fakepng")})
+			r.Content = append(r.Content, &tool.ImageContent{MIMEType: "image/png", Data: []byte("fakepng")})
 			return r, nil
 		})
 
@@ -720,17 +720,17 @@ func TestE2E_MCPRoundTripFidelity(t *testing.T) {
 	// 3. Verify multi-content preserved.
 	textCount, imageCount := 0, 0
 	for _, c := range result.Content {
-		switch c.ContentType() {
-		case "text":
+		switch v := c.(type) {
+		case *tool.TextContent:
 			textCount++
-		case "image":
+			_ = v
+		case *tool.ImageContent:
 			imageCount++
-			img := c.(tool.ImageContent)
-			if img.MIMEType != "image/png" {
-				t.Errorf("image MIME = %q", img.MIMEType)
+			if v.MIMEType != "image/png" {
+				t.Errorf("image MIME = %q", v.MIMEType)
 			}
-			if string(img.Data) != "fakepng" {
-				t.Errorf("image data = %q", img.Data)
+			if string(v.Data) != "fakepng" {
+				t.Errorf("image data = %q", v.Data)
 			}
 		}
 	}

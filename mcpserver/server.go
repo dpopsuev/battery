@@ -74,24 +74,15 @@ func (s *Server) build() {
 // timing/logging. InputSchema defaults to {"type":"object"}.
 func (s *Server) Tool(meta server.ToolMeta, handler server.Handler) *Server {
 	s.build()
-
 	observed := server.Observable(meta.Name, handler)
-
-	s.sdk.AddTool(
-		&sdkmcp.Tool{
-			Name:        meta.Name,
-			Description: meta.Description,
-			InputSchema: map[string]any{"type": "object"},
-		},
-		adaptHandler(observed),
-	)
+	t := buildSDKTool(meta, map[string]any{"type": "object"}, nil)
+	s.sdk.AddTool(t, adaptHandler(observed))
 	return s
 }
 
 // ToolWithSchema registers a tool with an explicit JSON input schema.
 func (s *Server) ToolWithSchema(meta server.ToolMeta, schema json.RawMessage, handler server.Handler) *Server {
 	s.build()
-
 	observed := server.Observable(meta.Name, handler)
 
 	var schemaObj any
@@ -99,15 +90,100 @@ func (s *Server) ToolWithSchema(meta server.ToolMeta, schema json.RawMessage, ha
 		schemaObj = map[string]any{"type": "object"}
 	}
 
-	s.sdk.AddTool(
-		&sdkmcp.Tool{
-			Name:        meta.Name,
-			Description: meta.Description,
-			InputSchema: schemaObj,
-		},
-		adaptHandler(observed),
-	)
+	t := buildSDKTool(meta, schemaObj, nil)
+	s.sdk.AddTool(t, adaptHandler(observed))
 	return s
+}
+
+// ToolWithTool registers a battery tool.Tool directly, deriving annotations
+// from optional interfaces (Cacheable, Gauged) and exposing ToolMeta in _meta.
+func (s *Server) ToolWithTool(meta server.ToolMeta, bt tool.Tool) *Server {
+	s.build()
+	handler := func(ctx context.Context, input json.RawMessage) (tool.Result, error) {
+		return bt.Execute(ctx, input)
+	}
+	observed := server.Observable(meta.Name, handler)
+
+	var schemaObj any
+	if bt.InputSchema() != nil {
+		if err := json.Unmarshal(bt.InputSchema(), &schemaObj); err != nil {
+			schemaObj = map[string]any{"type": "object"}
+		}
+	} else {
+		schemaObj = map[string]any{"type": "object"}
+	}
+
+	t := buildSDKTool(meta, schemaObj, bt)
+	s.sdk.AddTool(t, adaptHandler(observed))
+	return s
+}
+
+// buildSDKTool creates an sdkmcp.Tool from ToolMeta, deriving ToolAnnotations
+// from optional interfaces and exposing metadata in _meta.
+func buildSDKTool(meta server.ToolMeta, inputSchema any, bt tool.Tool) *sdkmcp.Tool {
+	t := &sdkmcp.Tool{
+		Name:        meta.Name,
+		Description: meta.Description,
+		InputSchema: inputSchema,
+	}
+
+	// Derive ToolAnnotations from optional interfaces.
+	if bt != nil {
+		t.Annotations = deriveAnnotations(bt)
+	}
+
+	// Expose ToolMeta in _meta for MCP client discovery.
+	if len(meta.Keywords) > 0 || len(meta.Categories) > 0 || meta.Priority > 0 {
+		t.Meta = sdkmcp.Meta{}
+		if len(meta.Keywords) > 0 {
+			t.Meta["battery.keywords"] = meta.Keywords
+		}
+		if len(meta.Categories) > 0 {
+			t.Meta["battery.categories"] = meta.Categories
+		}
+		if meta.Priority > 0 {
+			t.Meta["battery.priority"] = meta.Priority
+		}
+	}
+
+	return t
+}
+
+// deriveAnnotations builds ToolAnnotations from a tool's optional interfaces.
+func deriveAnnotations(bt tool.Tool) *sdkmcp.ToolAnnotations {
+	ann := &sdkmcp.ToolAnnotations{}
+	has := false
+
+	if _, ok := bt.(tool.Cacheable); ok {
+		ann.IdempotentHint = true
+		has = true
+	}
+
+	if _, ok := bt.(tool.Gauged); ok {
+		v := true
+		ann.OpenWorldHint = &v
+		has = true
+	}
+
+	if tm, ok := bt.(tool.ToolMetadata); ok {
+		has = has || deriveDestructive(ann, tm.Metadata())
+	}
+
+	if !has {
+		return nil
+	}
+	return ann
+}
+
+func deriveDestructive(ann *sdkmcp.ToolAnnotations, m tool.Metadata) bool {
+	for _, cap := range m.Capabilities {
+		if cap == "write" || cap == "delete" || cap == "destructive" {
+			v := true
+			ann.DestructiveHint = &v
+			return true
+		}
+	}
+	return false
 }
 
 // WithInitTimeout overrides the default 30s init handshake watchdog.

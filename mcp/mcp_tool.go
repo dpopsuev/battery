@@ -40,38 +40,6 @@ func (t *mcpTool) Execute(ctx context.Context, input json.RawMessage) (tool.Resu
 		return tool.Result{}, fmt.Errorf("mcp tool %s: call: %w", t.Name(), err)
 	}
 
-	return convertResult(sdkResult), nil
-}
-
-// convertResult translates an MCP CallToolResult to a Battery tool.Result,
-// preserving all content types and structured content.
-func convertResult(sdk *sdkmcp.CallToolResult) tool.Result {
-	r := tool.Result{
-		IsError:           sdk.IsError,
-		StructuredContent: sdk.StructuredContent,
-	}
-
-	for _, c := range sdk.Content {
-		switch v := c.(type) {
-		case *sdkmcp.TextContent:
-			r.Content = append(r.Content, tool.TextContent{Text: v.Text})
-		case *sdkmcp.ImageContent:
-			r.Content = append(r.Content, tool.ImageContent{MIMEType: v.MIMEType, Data: v.Data})
-		case *sdkmcp.AudioContent:
-			r.Content = append(r.Content, tool.AudioContent{MIMEType: v.MIMEType, Data: v.Data})
-		case *sdkmcp.ResourceLink:
-			r.Content = append(r.Content, tool.ResourceLink{
-				URI: v.URI, Name: v.Name, Description: v.Description, MIMEType: v.MIMEType,
-			})
-		case *sdkmcp.EmbeddedResource:
-			if v.Resource != nil {
-				r.Content = append(r.Content, tool.ResourceContent{
-					URI: v.Resource.URI, MIMEType: v.Resource.MIMEType,
-					Text: v.Resource.Text, Blob: v.Resource.Blob,
-				})
-			}
-		}
-	}
-
-	return r
+	// No translation needed — tool.Content IS sdkmcp.Content.
+	return tool.ResultFromSDK(sdkResult), nil
 }
