@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/dpopsuev/battery"
 	"github.com/dpopsuev/battery/server"
 	"github.com/dpopsuev/battery/tool"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -63,8 +64,12 @@ func (s *Server) build() {
 	if s.instructions != "" {
 		opts = &sdkmcp.ServerOptions{Instructions: s.instructions}
 	}
+	version := s.version
+	if battery.Version != "dev" {
+		version = s.version + " (battery/" + battery.Version + ")"
+	}
 	s.sdk = sdkmcp.NewServer(
-		&sdkmcp.Implementation{Name: s.name, Version: s.version},
+		&sdkmcp.Implementation{Name: s.name, Version: version},
 		opts,
 	)
 }

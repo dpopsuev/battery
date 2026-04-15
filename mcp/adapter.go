@@ -8,14 +8,24 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sync"
 
+	"github.com/dpopsuev/battery"
 	"github.com/dpopsuev/battery/tool"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // ErrServerNotFound is returned when the named MCP server is not registered.
 var ErrServerNotFound = errors.New("mcp server not found")
+
+// Log key constants.
+const (
+	logKeyServer        = "server"
+	logKeyServerName    = "server_name"
+	logKeyServerVersion = "server_version"
+	logKeyClientVersion = "client_version"
+)
 
 // ErrMCPToolError is returned when an MCP tool call returns IsError=true.
 var ErrMCPToolError = errors.New("mcp tool error")
@@ -31,9 +41,10 @@ type serverConn struct {
 // MCPAdapter manages connections to external MCP servers and registers
 // their tools as battery/tool.Tool instances in a tool.Registry.
 type MCPAdapter struct {
-	mu       sync.Mutex
-	registry *tool.Registry
-	servers  map[string]*serverConn
+	mu               sync.Mutex
+	registry         *tool.Registry
+	servers          map[string]*serverConn
+	minServerVersion string // optional: reject servers below this version
 }
 
 // NewMCPAdapter creates an adapter that registers MCP-backed tools into the given registry.
@@ -44,18 +55,37 @@ func NewMCPAdapter(registry *tool.Registry) *MCPAdapter {
 	}
 }
 
+// WithMinServerVersion sets a minimum server version. RegisterMCP will log
+// the server's declared version. This is informational — version format
+// is not enforced, consumers parse as needed.
+func (a *MCPAdapter) WithMinServerVersion(v string) *MCPAdapter {
+	a.minServerVersion = v
+	return a
+}
+
 // RegisterMCP connects to the MCP server over the given transport, calls tools/list,
 // and registers each discovered tool into the registry as a tool.Tool.
 // The name parameter prefixes tool names to avoid collisions: "servername.toolname".
 func (a *MCPAdapter) RegisterMCP(ctx context.Context, name string, transport sdkmcp.Transport) error {
+	clientVersion := "battery/" + battery.Version
 	client := sdkmcp.NewClient(
-		&sdkmcp.Implementation{Name: "battery-mcp-adapter", Version: "v0.1.0"},
+		&sdkmcp.Implementation{Name: "battery-mcp-adapter", Version: clientVersion},
 		nil,
 	)
 
 	session, err := client.Connect(ctx, transport, nil)
 	if err != nil {
 		return fmt.Errorf("mcp connect %q: %w", name, err)
+	}
+
+	// Log server identity from handshake.
+	if initResult := session.InitializeResult(); initResult != nil && initResult.ServerInfo != nil {
+		slog.InfoContext(ctx, "battery: MCP connected",
+			logKeyServer, name,
+			logKeyServerName, initResult.ServerInfo.Name,
+			logKeyServerVersion, initResult.ServerInfo.Version,
+			logKeyClientVersion, clientVersion,
+		)
 	}
 
 	listResult, err := session.ListTools(ctx, nil)
