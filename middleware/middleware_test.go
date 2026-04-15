@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dpopsuev/battery/cache"
 	"github.com/dpopsuev/battery/middleware"
 	"github.com/dpopsuev/battery/testkit"
 	"github.com/dpopsuev/battery/tool"
@@ -227,6 +228,54 @@ func TestDefaultRecorder_NotCalledWhenExplicitSet(t *testing.T) {
 func TestDefaultRecorder_NilByDefault(t *testing.T) {
 	if middleware.DefaultRecorder() != nil {
 		t.Error("default recorder should be nil before SetDefaultRecorder")
+	}
+}
+
+func TestEnvelope_CacheHitSkipsExecute(t *testing.T) {
+	t.Parallel()
+	cacheable := &testkit.StubCacheableTool{
+		StubTool: *testkit.NewStubTool("compute", ""),
+		KeyFn: func(input json.RawMessage) (string, bool) {
+			return "k:" + string(input), true
+		},
+	}
+	cacheable.Result = "computed"
+
+	executor := testkit.NewStubExecutor(cacheable)
+	mc := cache.NewMemCache(cache.MemCacheConfig{MaxEntries: 10})
+	hook := &testkit.StubHook{}
+
+	env, err := middleware.NewBuilder(executor).
+		WithGate(testkit.NewStubSecurityGate(true, "")).
+		WithCache(mc, hook, 0).
+		Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// First call: miss.
+	result, err := env.Execute(context.Background(), "compute", json.RawMessage(`{"x":1}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("first call: text=%q, calls=%d", result.Text(), len(executor.Calls))
+	t.Logf("cache events: %+v", hook.CacheEvents)
+
+	// Verify miss event fired.
+	if len(hook.CacheEvents) != 1 || hook.CacheEvents[0].Hit {
+		t.Errorf("expected 1 miss event, got %+v", hook.CacheEvents)
+	}
+
+	// Second call: hit.
+	result2, err := env.Execute(context.Background(), "compute", json.RawMessage(`{"x":1}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("second call: text=%q, calls=%d", result2.Text(), len(executor.Calls))
+	t.Logf("cache events: %+v", hook.CacheEvents)
+
+	if len(executor.Calls) != 1 {
+		t.Errorf("expected 1 execute call (cache hit), got %d", len(executor.Calls))
 	}
 }
 

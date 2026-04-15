@@ -47,6 +47,21 @@ func AsSecurityGate(g Gate) SecurityGate {
 	return securityGateAdapter{g}
 }
 
+// CacheStore is a minimal cache interface for the Envelope pipeline.
+// Defined here to avoid coupling middleware to the cache package (ISP).
+// cache.MemCache satisfies this interface.
+type CacheStore interface {
+	Get(ctx context.Context, namespace, key string) ([]byte, bool, error)
+	Set(ctx context.Context, namespace, key string, value []byte, ttl time.Duration) error
+}
+
+// CacheHook receives cache hit/miss notifications.
+// observer.Hook satisfies this via OnCacheHit/OnCacheMiss.
+type CacheHook interface {
+	OnCacheHit(ctx context.Context, toolName, key string)
+	OnCacheMiss(ctx context.Context, toolName, key string)
+}
+
 // GaugeFunc receives measurements from tools that implement tool.Gauged.
 // Called by the Envelope after Execute when configured via WithGaugeFunc.
 // Defined as a function type to avoid coupling middleware to observer.

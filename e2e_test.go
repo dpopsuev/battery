@@ -684,3 +684,220 @@ func TestE2E_GaugeFullChain(t *testing.T) {
 		t.Errorf("expected no gauge event for non-gauged tool, got %d", gaugeCount)
 	}
 }
+
+// TestE2E_MCPRoundTripFidelity proves that multi-content results survive
+// the Battery round-trip: MCP server → MCPAdapter → tool.Result → mcpserver → client.
+func TestE2E_MCPRoundTripFidelity(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// 1. Server returns a multi-content result with structured content.
+	srv := mcpserver.NewServer("multi-svc", "v1.0.0").
+		Tool(server.ToolMeta{Name: "rich", Description: "Rich output"}, func(_ context.Context, _ json.RawMessage) (tool.Result, error) {
+			r, _ := tool.StructuredResult(map[string]any{"score": 95})
+			// Add an image content block alongside the text fallback.
+			r.Content = append(r.Content, tool.ImageContent{MIMEType: "image/png", Data: []byte("fakepng")})
+			return r, nil
+		})
+
+	serverTransport, clientTransport := sdkmcp.NewInMemoryTransports()
+	go func() { _ = srv.Serve(ctx, serverTransport) }()
+
+	// 2. Client receives via MCPAdapter.
+	registry := tool.NewRegistry()
+	adapter := battmcp.NewMCPAdapter(registry)
+	if err := adapter.RegisterMCP(ctx, "multi", clientTransport); err != nil {
+		t.Fatalf("RegisterMCP: %v", err)
+	}
+
+	result, err := registry.Execute(ctx, "multi.rich", nil)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	// 3. Verify multi-content preserved.
+	textCount, imageCount := 0, 0
+	for _, c := range result.Content {
+		switch c.ContentType() {
+		case "text":
+			textCount++
+		case "image":
+			imageCount++
+			img := c.(tool.ImageContent)
+			if img.MIMEType != "image/png" {
+				t.Errorf("image MIME = %q", img.MIMEType)
+			}
+			if string(img.Data) != "fakepng" {
+				t.Errorf("image data = %q", img.Data)
+			}
+		}
+	}
+	if textCount < 1 {
+		t.Error("expected at least 1 TextContent block")
+	}
+	if imageCount != 1 {
+		t.Errorf("expected 1 ImageContent, got %d", imageCount)
+	}
+
+	// 4. Verify structured content preserved.
+	if result.StructuredContent == nil {
+		t.Fatal("StructuredContent is nil — lost in round-trip")
+	}
+}
+
+// TestE2E_TypedToolOutputSchema proves TypedTool[In, Out] registers output schema
+// and returns StructuredContent through the MCP round-trip.
+func TestE2E_TypedToolOutputSchema(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	type searchInput struct {
+		Query string `json:"query"`
+	}
+	type searchOutput struct {
+		Matches int    `json:"matches"`
+		Query   string `json:"query"`
+	}
+
+	tt := typed.New("search", "Search", func(_ context.Context, in searchInput) (searchOutput, error) {
+		return searchOutput{Matches: 5, Query: in.Query}, nil
+	})
+
+	// Verify OutputSchema is derived.
+	if len(tt.OutputSchema()) == 0 {
+		t.Fatal("OutputSchema is empty")
+	}
+
+	// Register on MCP server and call through client.
+	srv := mcpserver.NewServer("search-svc", "v1.0.0").
+		ToolWithSchema(
+			server.ToolMeta{Name: tt.Name(), Description: tt.Description()},
+			tt.InputSchema(),
+			func(ctx context.Context, input json.RawMessage) (tool.Result, error) {
+				return tt.Execute(ctx, input)
+			},
+		)
+
+	serverTransport, clientTransport := sdkmcp.NewInMemoryTransports()
+	go func() { _ = srv.Serve(ctx, serverTransport) }()
+
+	registry := tool.NewRegistry()
+	adapter := battmcp.NewMCPAdapter(registry)
+	if err := adapter.RegisterMCP(ctx, "search", clientTransport); err != nil {
+		t.Fatalf("RegisterMCP: %v", err)
+	}
+
+	result, err := registry.Execute(ctx, "search.search", json.RawMessage(`{"query":"battery"}`))
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	// Verify StructuredContent round-tripped.
+	if result.StructuredContent == nil {
+		t.Fatal("StructuredContent nil after round-trip")
+	}
+
+	var parsed searchOutput
+	if err := json.Unmarshal([]byte(result.Text()), &parsed); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if parsed.Matches != 5 || parsed.Query != "battery" {
+		t.Errorf("parsed = %+v", parsed)
+	}
+}
+
+// TestE2E_CachePipeline proves the Envelope cache step:
+// same args → cache hit, different args → miss, Gauge skipped on hit.
+func TestE2E_CachePipeline(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	// 1. Cacheable + Gauged tool.
+	callCount := 0
+	cacheable := &testkit.StubCacheableTool{
+		StubTool: *testkit.NewStubTool("compute", "Expensive computation"),
+		KeyFn: func(input json.RawMessage) (string, bool) {
+			return "key:" + string(input), true
+		},
+	}
+	cacheable.Result = "computed"
+
+	// Wrap to count actual executions.
+	wrappedTools := testkit.NewStubExecutor(cacheable)
+
+	// 2. Observer + cache.
+	ring := observer.NewRing(100)
+	hook := observer.NewRingHook(ring)
+	mc := cache.NewMemCache(cache.MemCacheConfig{MaxEntries: 100})
+
+	// 3. Build Envelope with cache.
+	env, err := middleware.NewBuilder(wrappedTools).
+		WithGate(testkit.NewStubSecurityGate(true, "")).
+		WithCache(mc, hook, 0).
+		Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	input := json.RawMessage(`{"x":1}`)
+
+	// 4. First call — cache miss, tool executes.
+	result, err := env.Execute(ctx, "compute", input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Text() != "computed" {
+		t.Errorf("result = %q", result.Text())
+	}
+	callCount = len(wrappedTools.Calls)
+	if callCount != 1 {
+		t.Fatalf("expected 1 execution, got %d", callCount)
+	}
+
+	// Verify cache miss event.
+	missEvents := 0
+	for _, e := range ring.Last(100) {
+		if e.Action == "cache_miss" {
+			missEvents++
+		}
+	}
+	if missEvents != 1 {
+		t.Errorf("expected 1 cache_miss event, got %d", missEvents)
+	}
+
+	// 5. Second call same args — cache hit, tool does NOT execute.
+	result2, err := env.Execute(ctx, "compute", input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result2.Text() != "computed" {
+		t.Errorf("cached result = %q", result2.Text())
+	}
+	if len(wrappedTools.Calls) != 1 {
+		t.Errorf("tool should not have been called again, calls = %d", len(wrappedTools.Calls))
+	}
+
+	// Verify cache hit event.
+	hitEvents := 0
+	for _, e := range ring.Last(100) {
+		if e.Action == "cache_hit" {
+			hitEvents++
+		}
+	}
+	if hitEvents != 1 {
+		t.Errorf("expected 1 cache_hit event, got %d", hitEvents)
+	}
+
+	// 6. Third call different args — cache miss, tool executes again.
+	_, err = env.Execute(ctx, "compute", json.RawMessage(`{"x":2}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(wrappedTools.Calls) != 2 {
+		t.Errorf("expected 2 executions after different args, got %d", len(wrappedTools.Calls))
+	}
+}

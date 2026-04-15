@@ -20,8 +20,11 @@ type Envelope struct {
 	enrichers        []Enricher
 	recorders        []Recorder
 	executor         tool.Executor
-	maxResultDefault int       // default max output bytes; 0 = unlimited
-	gaugeFunc        GaugeFunc // optional; nil = no gauge collection
+	maxResultDefault int        // default max output bytes; 0 = unlimited
+	gaugeFunc        GaugeFunc  // optional; nil = no gauge collection
+	cacheStore       CacheStore // optional; nil = no caching
+	cacheHook        CacheHook  // optional; nil = no cache event notifications
+	cacheTTL         time.Duration
 }
 
 var _ tool.Executor = (*Envelope)(nil)
@@ -48,10 +51,27 @@ func (e *Envelope) Execute(ctx context.Context, name string, input json.RawMessa
 		}
 	}
 
-	// Execute.
-	start := time.Now()
-	output, execErr := e.executor.Execute(ctx, name, input)
-	elapsed := time.Since(start)
+	// Cache check (after gates, before execute).
+	cacheKey, cached := e.checkCache(ctx, name, input)
+	cacheHit := cached != nil
+
+	var output tool.Result
+	var execErr error
+	var elapsed time.Duration
+
+	if cacheHit {
+		output = *cached
+	} else {
+		// Execute.
+		start := time.Now()
+		output, execErr = e.executor.Execute(ctx, name, input)
+		elapsed = time.Since(start)
+
+		// Cache store (untruncated result).
+		if execErr == nil && cacheKey != "" {
+			e.storeCache(ctx, name, cacheKey, output)
+		}
+	}
 
 	// Append enrichments to result on success.
 	if execErr == nil && len(enrichments) > 0 {
@@ -63,8 +83,8 @@ func (e *Envelope) Execute(ctx context.Context, name string, input json.RawMessa
 		output = e.truncateResult(name, output)
 	}
 
-	// Gauge (optional, non-blocking, errors swallowed).
-	if execErr == nil && e.gaugeFunc != nil {
+	// Gauge (optional, non-blocking, skip on cache hit — tool didn't run).
+	if execErr == nil && e.gaugeFunc != nil && !cacheHit {
 		e.collectGauge(ctx, name)
 	}
 
@@ -125,6 +145,62 @@ func (e *Envelope) truncateResult(name string, r tool.Result) tool.Result {
 	return r
 }
 
+// checkCache looks up a cached result if the tool implements Cacheable and a CacheStore is configured.
+// Returns the cache key and the cached Result (nil on miss or no cache).
+func (e *Envelope) checkCache(ctx context.Context, name string, input json.RawMessage) (string, *tool.Result) {
+	if e.cacheStore == nil {
+		return "", nil
+	}
+
+	// Find the tool and check Cacheable.
+	var cacheKey string
+	for _, t := range e.executor.All() {
+		if t.Name() == name {
+			if c, ok := t.(tool.Cacheable); ok {
+				key, cacheable := c.CacheKey(ctx, input)
+				if cacheable {
+					cacheKey = key
+				}
+			}
+			break
+		}
+	}
+	if cacheKey == "" {
+		return "", nil
+	}
+
+	// Check cache.
+	data, ok, err := e.cacheStore.Get(ctx, name, cacheKey)
+	if err != nil || !ok {
+		if e.cacheHook != nil {
+			e.cacheHook.OnCacheMiss(ctx, name, cacheKey)
+		}
+		return cacheKey, nil
+	}
+
+	var result tool.Result
+	if err := json.Unmarshal(data, &result); err != nil {
+		return cacheKey, nil
+	}
+
+	if e.cacheHook != nil {
+		e.cacheHook.OnCacheHit(ctx, name, cacheKey)
+	}
+	return cacheKey, &result
+}
+
+// storeCache serializes and stores a Result in the cache.
+func (e *Envelope) storeCache(ctx context.Context, name, key string, r tool.Result) {
+	if e.cacheStore == nil {
+		return
+	}
+	data, err := json.Marshal(r)
+	if err != nil {
+		return
+	}
+	_ = e.cacheStore.Set(ctx, name, key, data, e.cacheTTL) // errors swallowed
+}
+
 // collectGauge checks if the executed tool implements Gauged and fires gaugeFunc.
 func (e *Envelope) collectGauge(ctx context.Context, name string) {
 	for _, t := range e.executor.All() {
@@ -150,6 +226,9 @@ type Builder struct {
 	hasSecurity      bool
 	maxResultDefault int
 	gaugeFunc        GaugeFunc
+	cacheStore       CacheStore
+	cacheHook        CacheHook
+	cacheTTL         time.Duration
 }
 
 // NewBuilder creates an Envelope builder wrapping the given executor.
@@ -214,6 +293,16 @@ func (b *Builder) WithGaugeFunc(fn GaugeFunc) *Builder {
 	return b
 }
 
+// WithCache enables result caching for tools that implement tool.Cacheable.
+// The store holds serialized tool.Result values. The hook receives hit/miss events.
+// TTL applies to all cached entries (0 = store's default).
+func (b *Builder) WithCache(store CacheStore, hook CacheHook, ttl time.Duration) *Builder {
+	b.cacheStore = store
+	b.cacheHook = hook
+	b.cacheTTL = ttl
+	return b
+}
+
 // Build creates the Envelope. Fails if no SecurityGate was added.
 func (b *Builder) Build() (*Envelope, error) {
 	if !b.hasSecurity {
@@ -226,5 +315,8 @@ func (b *Builder) Build() (*Envelope, error) {
 		executor:         b.executor,
 		maxResultDefault: b.maxResultDefault,
 		gaugeFunc:        b.gaugeFunc,
+		cacheStore:       b.cacheStore,
+		cacheHook:        b.cacheHook,
+		cacheTTL:         b.cacheTTL,
 	}, nil
 }
