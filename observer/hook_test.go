@@ -14,8 +14,15 @@ import (
 // tr is a shorthand for tool.TextResult in tests.
 func tr(s string) tool.Result { return tool.TextResult(s) }
 
-// HookContract validates any Hook implementation.
-func HookContract(t *testing.T, newHook func() observer.Hook) {
+// fullHook combines all hook interfaces for contract testing.
+type fullHook interface {
+	observer.ToolHook
+	observer.GaugeHook
+	observer.CacheHook
+}
+
+// HookContract validates any implementation that satisfies all hook interfaces.
+func HookContract(t *testing.T, newHook func() fullHook) {
 	t.Helper()
 
 	t.Run("OnToolCall", func(t *testing.T) {
@@ -54,7 +61,7 @@ func HookContract(t *testing.T, newHook func() observer.Hook) {
 func TestRingHook(t *testing.T) {
 	ring := observer.NewRing(100)
 
-	HookContract(t, func() observer.Hook {
+	HookContract(t, func() fullHook {
 		return observer.NewRingHook(ring)
 	})
 
@@ -145,4 +152,31 @@ func TestMultiHook(t *testing.T) {
 			t.Errorf("ring %d: expected 2 events, got %d", i, len(events))
 		}
 	}
+}
+
+// TestPartialHook proves a consumer implementing only ToolHook
+// can be used with MultiHook without panic.
+func TestPartialHook(t *testing.T) {
+	partial := &toolOnlyHook{}
+	multi := observer.NewMultiHook(partial)
+
+	// These should work (ToolHook).
+	multi.OnToolCall(context.Background(), "read", nil)
+	multi.OnToolResult(context.Background(), "read", tool.Result{}, nil, 0)
+
+	// These should be silently skipped (partial doesn't implement GaugeHook/CacheHook).
+	multi.OnGaugeMeasurement(context.Background(), "read", nil)
+	multi.OnCacheHit(context.Background(), "read", "key")
+	multi.OnCacheMiss(context.Background(), "read", "key")
+
+	if partial.calls != 2 {
+		t.Errorf("expected 2 ToolHook calls, got %d", partial.calls)
+	}
+}
+
+type toolOnlyHook struct{ calls int }
+
+func (h *toolOnlyHook) OnToolCall(context.Context, string, json.RawMessage) { h.calls++ }
+func (h *toolOnlyHook) OnToolResult(context.Context, string, tool.Result, error, time.Duration) {
+	h.calls++
 }

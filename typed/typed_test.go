@@ -168,6 +168,35 @@ func TestTypedTool_OutputSchema(t *testing.T) {
 	}
 }
 
+func TestTypedTool_NotCacheableByDefault(t *testing.T) {
+	tt := typed.New("analyze", "Analyze", func(_ context.Context, _ analyzeInput) (analyzeOutput, error) {
+		return analyzeOutput{}, nil
+	})
+	var t2 tool.Tool = tt
+	if _, ok := t2.(tool.Cacheable); ok {
+		t.Error("TypedTool should NOT implement Cacheable by default")
+	}
+}
+
+func TestTypedTool_WithDefaultCacheKey(t *testing.T) {
+	ct := typed.New("analyze", "Analyze", func(_ context.Context, _ analyzeInput) (analyzeOutput, error) {
+		return analyzeOutput{}, nil
+	}).WithDefaultCacheKey()
+
+	var t2 tool.Tool = ct
+	c, ok := t2.(tool.Cacheable)
+	if !ok {
+		t.Fatal("WithDefaultCacheKey should implement Cacheable")
+	}
+	key, cok := c.CacheKey(context.Background(), json.RawMessage(`{"path":"x"}`))
+	if !cok {
+		t.Fatal("expected cacheable")
+	}
+	if key == "" {
+		t.Error("expected non-empty key")
+	}
+}
+
 func TestTypedTool_RegisterInRegistry(t *testing.T) {
 	tt := typed.New("analyze", "Analyze code", func(_ context.Context, in analyzeInput) (analyzeOutput, error) {
 		return analyzeOutput{Path: in.Path, Depth: 42}, nil

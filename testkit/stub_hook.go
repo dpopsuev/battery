@@ -46,7 +46,9 @@ type StubHook struct {
 	CacheEvents       []StubCacheEvent
 }
 
-var _ observer.Hook = (*StubHook)(nil)
+var _ observer.ToolHook = (*StubHook)(nil)
+var _ observer.GaugeHook = (*StubHook)(nil)
+var _ observer.CacheHook = (*StubHook)(nil)
 
 func (h *StubHook) OnToolCall(_ context.Context, tool string, input json.RawMessage) {
 	h.mu.Lock()

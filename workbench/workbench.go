@@ -161,7 +161,8 @@ func (w *Workbench) resolve(name string) (tool.Tool, error) {
 }
 
 // executePipe runs a pipeline: output of step N → input of step N+1.
-// The text output of step N becomes {"input":"<text>"} for step N+1.
+// If step N returns StructuredContent, it is serialized as the input for step N+1.
+// Otherwise, the full Result is serialized as {"result": <Result>} for step N+1.
 func (w *Workbench) executePipe(ctx context.Context, steps []string, input json.RawMessage) (tool.Result, error) {
 	current := input
 	var lastResult tool.Result
@@ -174,8 +175,14 @@ func (w *Workbench) executePipe(ctx context.Context, steps []string, input json.
 		if err != nil {
 			return tool.Result{}, fmt.Errorf("pipe step %d (%s): %w", i, step, err)
 		}
-		// Wrap text output as input for next step.
-		current, err = json.Marshal(map[string]string{"input": lastResult.Text()})
+		// Pass full Result as input to next step.
+		// Prefer StructuredContent if available (typed data).
+		// Fall back to serialized Result (preserves all content types).
+		if lastResult.StructuredContent != nil {
+			current, err = json.Marshal(lastResult.StructuredContent)
+		} else {
+			current, err = json.Marshal(lastResult)
+		}
 		if err != nil {
 			return tool.Result{}, fmt.Errorf("pipe step %d (%s): marshal: %w", i, step, err)
 		}

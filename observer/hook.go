@@ -9,25 +9,37 @@ import (
 	"github.com/dpopsuev/battery/tool"
 )
 
-// Hook receives notifications about tool lifecycle events.
-// Implementations must be safe for concurrent use.
-type Hook interface {
+// ToolHook receives core tool lifecycle events.
+type ToolHook interface {
 	OnToolCall(ctx context.Context, toolName string, input json.RawMessage)
 	OnToolResult(ctx context.Context, toolName string, result tool.Result, err error, elapsed time.Duration)
+}
+
+// GaugeHook receives tool measurement events.
+type GaugeHook interface {
 	OnGaugeMeasurement(ctx context.Context, toolName string, measurements []tool.Measurement)
+}
+
+// CacheHook receives cache hit/miss events.
+type CacheHook interface {
 	OnCacheHit(ctx context.Context, toolName, key string)
 	OnCacheMiss(ctx context.Context, toolName, key string)
 }
 
-// RingHook adapts a Ring into a Hook, translating hook calls into Event appends.
+// RingHook adapts a Ring into lifecycle hooks, translating calls into Event appends.
+// Implements ToolHook, GaugeHook, and CacheHook.
 type RingHook struct {
 	ring *Ring
 }
 
-// NewRingHook returns a Hook that writes tool events to the given Ring.
+// NewRingHook returns a hook that writes tool events to the given Ring.
 func NewRingHook(r *Ring) *RingHook {
 	return &RingHook{ring: r}
 }
+
+var _ ToolHook = (*RingHook)(nil)
+var _ GaugeHook = (*RingHook)(nil)
+var _ CacheHook = (*RingHook)(nil)
 
 // OnToolCall records a tool invocation event.
 func (h *RingHook) OnToolCall(_ context.Context, toolName string, _ json.RawMessage) {
@@ -86,47 +98,59 @@ func (h *RingHook) OnCacheMiss(_ context.Context, toolName, key string) {
 	})
 }
 
-// MultiHook fans out hook calls to multiple Hooks.
+// MultiHook fans out hook calls to multiple hooks.
+// Each target is checked via type assertion — targets only receive
+// events for the interfaces they implement.
 type MultiHook struct {
-	hooks []Hook
+	targets []any
 }
 
-// NewMultiHook returns a Hook that forwards to all given hooks.
-func NewMultiHook(hooks ...Hook) *MultiHook {
-	return &MultiHook{hooks: hooks}
+// NewMultiHook returns a hook that forwards to all given targets.
+// Each target should implement one or more of ToolHook, GaugeHook, CacheHook.
+func NewMultiHook(targets ...any) *MultiHook {
+	return &MultiHook{targets: targets}
 }
 
-// OnToolCall forwards to all wrapped hooks.
+var _ ToolHook = (*MultiHook)(nil)
+var _ GaugeHook = (*MultiHook)(nil)
+var _ CacheHook = (*MultiHook)(nil)
+
 func (m *MultiHook) OnToolCall(ctx context.Context, toolName string, input json.RawMessage) {
-	for _, h := range m.hooks {
-		h.OnToolCall(ctx, toolName, input)
+	for _, t := range m.targets {
+		if h, ok := t.(ToolHook); ok {
+			h.OnToolCall(ctx, toolName, input)
+		}
 	}
 }
 
-// OnToolResult forwards to all wrapped hooks.
 func (m *MultiHook) OnToolResult(ctx context.Context, toolName string, result tool.Result, err error, elapsed time.Duration) {
-	for _, h := range m.hooks {
-		h.OnToolResult(ctx, toolName, result, err, elapsed)
+	for _, t := range m.targets {
+		if h, ok := t.(ToolHook); ok {
+			h.OnToolResult(ctx, toolName, result, err, elapsed)
+		}
 	}
 }
 
-// OnGaugeMeasurement forwards to all wrapped hooks.
 func (m *MultiHook) OnGaugeMeasurement(ctx context.Context, toolName string, measurements []tool.Measurement) {
-	for _, h := range m.hooks {
-		h.OnGaugeMeasurement(ctx, toolName, measurements)
+	for _, t := range m.targets {
+		if h, ok := t.(GaugeHook); ok {
+			h.OnGaugeMeasurement(ctx, toolName, measurements)
+		}
 	}
 }
 
-// OnCacheHit forwards to all wrapped hooks.
 func (m *MultiHook) OnCacheHit(ctx context.Context, toolName, key string) {
-	for _, h := range m.hooks {
-		h.OnCacheHit(ctx, toolName, key)
+	for _, t := range m.targets {
+		if h, ok := t.(CacheHook); ok {
+			h.OnCacheHit(ctx, toolName, key)
+		}
 	}
 }
 
-// OnCacheMiss forwards to all wrapped hooks.
 func (m *MultiHook) OnCacheMiss(ctx context.Context, toolName, key string) {
-	for _, h := range m.hooks {
-		h.OnCacheMiss(ctx, toolName, key)
+	for _, t := range m.targets {
+		if h, ok := t.(CacheHook); ok {
+			h.OnCacheMiss(ctx, toolName, key)
+		}
 	}
 }
