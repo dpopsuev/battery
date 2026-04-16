@@ -1,12 +1,10 @@
-package server
+package tool
 
 import (
 	"context"
 	"encoding/json"
 	"errors"
 	"sort"
-
-	"github.com/dpopsuev/battery/tool"
 )
 
 // ErrToolNotAllowed indicates a tool is not available for the current role.
@@ -14,17 +12,17 @@ var ErrToolNotAllowed = errors.New("battery: tool not available for role")
 
 // Clearance wraps a tool.Executor with role-based filtering.
 // Only tools in the allowlist are visible and executable.
-// Implements tool.Executor (LSP — substitutable).
+// Implements Executor (LSP — substitutable).
 type Clearance struct {
-	executor tool.Executor
+	executor Executor
 	allowed  map[string]bool
 }
 
-var _ tool.Executor = (*Clearance)(nil)
+var _ Executor = (*Clearance)(nil)
 
 // NewClearance creates a Clearance that filters tools by an allowlist.
 // If allowedTools is empty, all tools are allowed.
-func NewClearance(executor tool.Executor, allowedTools []string) *Clearance {
+func NewClearance(executor Executor, allowedTools []string) *Clearance {
 	allowed := make(map[string]bool, len(allowedTools))
 	for _, name := range allowedTools {
 		allowed[name] = true
@@ -33,20 +31,20 @@ func NewClearance(executor tool.Executor, allowedTools []string) *Clearance {
 }
 
 // Execute runs a tool if it's in the allowlist.
-func (c *Clearance) Execute(ctx context.Context, name string, input json.RawMessage) (tool.Result, error) {
+func (c *Clearance) Execute(ctx context.Context, name string, input json.RawMessage) (Result, error) {
 	if len(c.allowed) > 0 && !c.allowed[name] {
-		return tool.Result{}, ErrToolNotAllowed
+		return Result{}, ErrToolNotAllowed
 	}
 	return c.executor.Execute(ctx, name, input)
 }
 
 // All returns only the allowed tools.
-func (c *Clearance) All() []tool.Tool {
+func (c *Clearance) All() []Tool {
 	all := c.executor.All()
 	if len(c.allowed) == 0 {
 		return all
 	}
-	var out []tool.Tool
+	var out []Tool
 	for _, t := range all {
 		if c.allowed[t.Name()] {
 			out = append(out, t)

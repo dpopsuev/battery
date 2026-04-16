@@ -7,7 +7,6 @@ import (
 	"time"
 
 	battmcp "github.com/dpopsuev/battery/mcp"
-	"github.com/dpopsuev/battery/server"
 	"github.com/dpopsuev/battery/testkit"
 	"github.com/dpopsuev/battery/tool"
 )
@@ -91,7 +90,7 @@ func TestMCPAdapter_ClearanceFilters(t *testing.T) {
 	}
 
 	// Clearance allows only 2 of 3 tools.
-	cleared := server.NewClearance(registry, []string{"locus.analysis", "locus.lint"})
+	cleared := tool.NewClearance(registry, []string{"locus.analysis", "locus.lint"})
 
 	// Visible tools filtered.
 	names := cleared.Names()

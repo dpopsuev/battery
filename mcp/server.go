@@ -1,7 +1,7 @@
 // Package mcpserver provides a Battery-integrated MCP server framework.
 // It eliminates boilerplate by wrapping sdkmcp.Server with auto-Observable,
 // result helpers, and a fluent builder API.
-package mcpserver
+package mcp
 
 import (
 	"context"
@@ -18,6 +18,39 @@ import (
 	"github.com/dpopsuev/battery/tool"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
+
+// handler is a server-side tool handler function.
+type handler func(ctx context.Context, input json.RawMessage) (tool.Result, error)
+
+// Log attribute keys for observable tool calls.
+const (
+	logKeyObsTool    = "tool"
+	logKeyObsElapsed = "elapsed"
+	logKeyObsError   = "error"
+)
+
+// observable wraps a handler with timing and error logging.
+func observable(name string, h handler) handler {
+	return func(ctx context.Context, input json.RawMessage) (tool.Result, error) {
+		start := time.Now()
+		result, err := h(ctx, input)
+		elapsed := time.Since(start)
+
+		if err != nil {
+			slog.WarnContext(ctx, "battery: tool failed",
+				slog.String(logKeyObsTool, name),
+				slog.Duration(logKeyObsElapsed, elapsed),
+				slog.String(logKeyObsError, err.Error()),
+			)
+		} else {
+			slog.DebugContext(ctx, "battery: tool completed",
+				slog.String(logKeyObsTool, name),
+				slog.Duration(logKeyObsElapsed, elapsed),
+			)
+		}
+		return result, err
+	}
+}
 
 // ErrHandlerPanicked is returned when a tool handler panics.
 var ErrHandlerPanicked = errors.New("battery: handler panicked")
@@ -74,21 +107,21 @@ func (s *Server) build() {
 	)
 }
 
-// Tool registers a tool using server.ToolMeta for metadata and server.Handler
+// Tool registers a tool using server.ToolMeta for metadata and handler
 // for the handler function. The handler is auto-wrapped with Observable for
 // timing/logging. InputSchema defaults to {"type":"object"}.
-func (s *Server) Tool(meta server.ToolMeta, handler server.Handler) *Server {
+func (s *Server) Tool(meta server.ToolMeta, h handler) *Server {
 	s.build()
-	observed := server.Observable(meta.Name, handler)
+	observed := observable(meta.Name, h)
 	t := buildSDKTool(meta, map[string]any{"type": "object"}, nil)
 	s.sdk.AddTool(t, adaptHandler(observed))
 	return s
 }
 
 // ToolWithSchema registers a tool with an explicit JSON input schema.
-func (s *Server) ToolWithSchema(meta server.ToolMeta, schema json.RawMessage, handler server.Handler) *Server {
+func (s *Server) ToolWithSchema(meta server.ToolMeta, schema json.RawMessage, h handler) *Server {
 	s.build()
-	observed := server.Observable(meta.Name, handler)
+	observed := observable(meta.Name, h)
 
 	var schemaObj any
 	if err := json.Unmarshal(schema, &schemaObj); err != nil {
@@ -107,7 +140,7 @@ func (s *Server) ToolWithTool(meta server.ToolMeta, bt tool.Tool) *Server {
 	handler := func(ctx context.Context, input json.RawMessage) (tool.Result, error) {
 		return bt.Execute(ctx, input)
 	}
-	observed := server.Observable(meta.Name, handler)
+	observed := observable(meta.Name, handler)
 
 	var schemaObj any
 	if bt.InputSchema() != nil {
@@ -259,12 +292,12 @@ func (s *Server) SDK() *sdkmcp.Server {
 	return s.sdk
 }
 
-// adaptHandler bridges server.Handler to sdkmcp.ToolHandler.
-// server.Handler: func(ctx, json.RawMessage) (tool.Result, error)
+// adaptHandler bridges handler to sdkmcp.ToolHandler.
+// handler: func(ctx, json.RawMessage) (tool.Result, error)
 // sdkmcp.ToolHandler: func(ctx, *CallToolRequest) (*CallToolResult, error)
 //
 // Includes panic recovery — a panicking handler returns error result, not a crash.
-func adaptHandler(h server.Handler) sdkmcp.ToolHandler {
+func adaptHandler(h handler) sdkmcp.ToolHandler {
 	return func(ctx context.Context, req *sdkmcp.CallToolRequest) (res *sdkmcp.CallToolResult, retErr error) {
 		defer func() {
 			if r := recover(); r != nil {

@@ -9,7 +9,6 @@ import (
 
 	"github.com/dpopsuev/battery/cache"
 	battmcp "github.com/dpopsuev/battery/mcp"
-	"github.com/dpopsuev/battery/mcpserver"
 	"github.com/dpopsuev/battery/middleware"
 	"github.com/dpopsuev/battery/observer"
 	"github.com/dpopsuev/battery/server"
@@ -131,7 +130,7 @@ func TestE2E_MCPClientServerRoundTrip(t *testing.T) {
 	defer cancel()
 
 	// 1. Build a server with mcpserver framework.
-	srv := mcpserver.NewServer("test-instrument", "v1.0.0").
+	srv := battmcp.NewServer("test-instrument", "v1.0.0").
 		WithInstructions("Test instrument for E2E").
 		Tool(server.ToolMeta{
 			Name:        "analyze",
@@ -189,7 +188,7 @@ func TestE2E_MCPClientServerRoundTrip(t *testing.T) {
 	}
 
 	// 6. Clearance filtering works on MCP-backed tools.
-	cleared := server.NewClearance(registry, []string{"instrument.lint"})
+	cleared := tool.NewClearance(registry, []string{"instrument.lint"})
 	if len(cleared.Names()) != 1 {
 		t.Errorf("clearance: %d tools visible, want 1", len(cleared.Names()))
 	}
@@ -216,7 +215,7 @@ func TestE2E_ObserverCacheRoundTrip(t *testing.T) {
 	defer cancel()
 
 	// 1. Build MCP server with a tool.
-	srv := mcpserver.NewServer("data-svc", "v1.0.0").
+	srv := battmcp.NewServer("data-svc", "v1.0.0").
 		Tool(server.ToolMeta{Name: "fetch", Description: "Fetch data"}, func(_ context.Context, input json.RawMessage) (tool.Result, error) {
 			var args struct {
 				ID string `json:"id"`
@@ -409,7 +408,7 @@ func TestE2E_TypedToolOnMCPServer(t *testing.T) {
 	})
 
 	// 2. Register on MCP server using the tool's own schema.
-	srv := mcpserver.NewServer("typed-svc", "v1.0.0").
+	srv := battmcp.NewServer("typed-svc", "v1.0.0").
 		ToolWithSchema(
 			server.ToolMeta{Name: tt.Name(), Description: tt.Description()},
 			tt.InputSchema(),
@@ -461,7 +460,7 @@ func TestE2E_Workbench(t *testing.T) {
 	defer cancel()
 
 	// 1. Build MCP server with a tool.
-	srv := mcpserver.NewServer("svc", "v1.0.0").
+	srv := battmcp.NewServer("svc", "v1.0.0").
 		Tool(server.ToolMeta{Name: "analyze", Description: "Analyze"}, func(_ context.Context, input json.RawMessage) (tool.Result, error) {
 			var args struct {
 				Path string `json:"path"`
@@ -694,7 +693,7 @@ func TestE2E_MCPRoundTripFidelity(t *testing.T) {
 	defer cancel()
 
 	// 1. Server returns a multi-content result with structured content.
-	srv := mcpserver.NewServer("multi-svc", "v1.0.0").
+	srv := battmcp.NewServer("multi-svc", "v1.0.0").
 		Tool(server.ToolMeta{Name: "rich", Description: "Rich output"}, func(_ context.Context, _ json.RawMessage) (tool.Result, error) {
 			r, _ := tool.StructuredResult(map[string]any{"score": 95})
 			// Add an image content block alongside the text fallback.
@@ -773,7 +772,7 @@ func TestE2E_TypedToolOutputSchema(t *testing.T) {
 	}
 
 	// Register on MCP server and call through client.
-	srv := mcpserver.NewServer("search-svc", "v1.0.0").
+	srv := battmcp.NewServer("search-svc", "v1.0.0").
 		ToolWithSchema(
 			server.ToolMeta{Name: tt.Name(), Description: tt.Description()},
 			tt.InputSchema(),

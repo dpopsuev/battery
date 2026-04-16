@@ -1,4 +1,4 @@
-package mcpserver_test
+package mcp_test
 
 import (
 	"context"
@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dpopsuev/battery/mcpserver"
+	battmcp "github.com/dpopsuev/battery/mcp"
 	"github.com/dpopsuev/battery/server"
 	"github.com/dpopsuev/battery/tool"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -16,7 +16,7 @@ import (
 
 // connectClient creates a paired in-memory transport, starts the server in
 // background, and returns a connected client session.
-func connectClient(t *testing.T, srv *mcpserver.Server) *sdkmcp.ClientSession {
+func connectClient(t *testing.T, srv *battmcp.Server) *sdkmcp.ClientSession {
 	t.Helper()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -45,7 +45,7 @@ func connectClient(t *testing.T, srv *mcpserver.Server) *sdkmcp.ClientSession {
 func TestServer_ToolRegistration(t *testing.T) {
 	t.Parallel()
 
-	srv := mcpserver.NewServer("test-server", "v0.1.0").
+	srv := battmcp.NewServer("test-server", "v0.1.0").
 		Tool(server.ToolMeta{
 			Name:        "echo",
 			Description: "Echo the input",
@@ -87,7 +87,7 @@ func TestServer_ToolRegistration(t *testing.T) {
 func TestServer_ToolExecution(t *testing.T) {
 	t.Parallel()
 
-	srv := mcpserver.NewServer("test-server", "v0.1.0").
+	srv := battmcp.NewServer("test-server", "v0.1.0").
 		Tool(server.ToolMeta{
 			Name:        "greet",
 			Description: "Greet a person",
@@ -191,7 +191,7 @@ func TestServer_AutoObservable(t *testing.T) {
 	slog.SetDefault(logger)
 	defer slog.SetDefault(old)
 
-	srv := mcpserver.NewServer("test-server", "v0.1.0").
+	srv := battmcp.NewServer("test-server", "v0.1.0").
 		Tool(server.ToolMeta{
 			Name:        "ping",
 			Description: "Ping",
@@ -219,7 +219,7 @@ func TestServer_AutoObservable(t *testing.T) {
 func TestServer_PanicRecovery(t *testing.T) {
 	t.Parallel()
 
-	srv := mcpserver.NewServer("test-server", "v0.1.0").
+	srv := battmcp.NewServer("test-server", "v0.1.0").
 		Tool(server.ToolMeta{
 			Name:        "boom",
 			Description: "Panics on every call",
@@ -254,7 +254,7 @@ func TestServer_ContextCancellation(t *testing.T) {
 	t.Parallel()
 
 	handlerCalled := make(chan struct{})
-	srv := mcpserver.NewServer("test-server", "v0.1.0").
+	srv := battmcp.NewServer("test-server", "v0.1.0").
 		Tool(server.ToolMeta{
 			Name:        "slow",
 			Description: "Blocks until context canceled",
@@ -302,7 +302,7 @@ func TestServer_ContextCancellation(t *testing.T) {
 func TestServer_GracefulShutdown(t *testing.T) {
 	t.Parallel()
 
-	srv := mcpserver.NewServer("test-server", "v0.1.0").
+	srv := battmcp.NewServer("test-server", "v0.1.0").
 		Tool(server.ToolMeta{
 			Name:        "ping",
 			Description: "Ping",
