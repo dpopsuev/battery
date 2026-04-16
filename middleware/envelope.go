@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/dpopsuev/battery/tool"
-	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // ErrNoSecurityGate indicates Build() was called without a SecurityGate.
@@ -48,7 +47,7 @@ func (e *Envelope) Execute(ctx context.Context, name string, input json.RawMessa
 	for _, en := range e.enrichers {
 		result, err := en.Enrich(ctx, name, input)
 		if err == nil && result != "" {
-			enrichments = append(enrichments, &tool.TextContent{Text: result})
+			enrichments = append(enrichments, tool.TextContent{Text: result})
 		}
 	}
 
@@ -137,11 +136,11 @@ func (e *Envelope) truncateResult(name string, r tool.Result) tool.Result {
 	truncated := text[:limit] + fmt.Sprintf("\n[battery: output truncated, %d bytes of %d limit]", len(text), limit)
 	var kept []tool.Content
 	for _, c := range r.Content {
-		if _, ok := c.(*tool.TextContent); !ok {
+		if _, ok := c.(tool.TextContent); !ok {
 			kept = append(kept, c)
 		}
 	}
-	kept = append(kept, &tool.TextContent{Text: truncated})
+	kept = append(kept, tool.TextContent{Text: truncated})
 	r.Content = kept
 	return r
 }
@@ -170,7 +169,7 @@ func (e *Envelope) checkCache(ctx context.Context, name string, input json.RawMe
 		return "", nil
 	}
 
-	// Check cache. Deserialize via SDK's CallToolResult (handles Content polymorphism).
+	// Check cache. Deserialize via tool.Result (has MarshalJSON/UnmarshalJSON).
 	data, ok, err := e.cacheStore.Get(ctx, name, cacheKey)
 	if err != nil || !ok {
 		if e.cacheHook != nil {
@@ -179,11 +178,10 @@ func (e *Envelope) checkCache(ctx context.Context, name string, input json.RawMe
 		return cacheKey, nil
 	}
 
-	var sdkResult sdkmcp.CallToolResult
-	if err := json.Unmarshal(data, &sdkResult); err != nil {
+	var result tool.Result
+	if err := json.Unmarshal(data, &result); err != nil {
 		return cacheKey, nil
 	}
-	result := tool.ResultFromSDK(&sdkResult)
 
 	if e.cacheHook != nil {
 		e.cacheHook.OnCacheHit(ctx, name, cacheKey)
@@ -191,12 +189,12 @@ func (e *Envelope) checkCache(ctx context.Context, name string, input json.RawMe
 	return cacheKey, &result
 }
 
-// storeCache serializes and stores a Result in the cache via SDK's CallToolResult.
+// storeCache serializes and stores a Result in the cache.
 func (e *Envelope) storeCache(ctx context.Context, name, key string, r tool.Result) {
 	if e.cacheStore == nil {
 		return
 	}
-	data, err := json.Marshal(r.ToSDK())
+	data, err := json.Marshal(r)
 	if err != nil {
 		return
 	}

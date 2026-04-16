@@ -11,9 +11,9 @@ import (
 func TestResult_Text(t *testing.T) {
 	r := tool.Result{
 		Content: []tool.Content{
-			&tool.TextContent{Text: "line 1"},
-			&tool.ImageContent{MIMEType: "image/png", Data: []byte("img")},
-			&tool.TextContent{Text: "line 2"},
+			tool.TextContent{Text: "line 1"},
+			tool.ImageContent{MIMEType: "image/png", Data: []byte("img")},
+			tool.TextContent{Text: "line 2"},
 		},
 	}
 	got := r.Text()
@@ -25,7 +25,7 @@ func TestResult_Text(t *testing.T) {
 func TestResult_TextEmpty(t *testing.T) {
 	r := tool.Result{
 		Content: []tool.Content{
-			&tool.ImageContent{MIMEType: "image/png", Data: []byte("img")},
+			tool.ImageContent{MIMEType: "image/png", Data: []byte("img")},
 		},
 	}
 	if r.Text() != "" {
@@ -90,15 +90,27 @@ func TestStructuredResult(t *testing.T) {
 	}
 }
 
-func TestResult_ToSDK_RoundTrip(t *testing.T) {
+func TestResult_JSONRoundTrip(t *testing.T) {
 	r := tool.TextResult("hello")
 	r.StructuredContent = json.RawMessage(`{"x":1}`)
-	sdk := r.ToSDK()
-	r2 := tool.ResultFromSDK(sdk)
+	r.Content = append(r.Content, tool.ImageContent{MIMEType: "image/png", Data: []byte("img")})
+
+	data, err := json.Marshal(r)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+
+	var r2 tool.Result
+	if err := json.Unmarshal(data, &r2); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
 	if r2.Text() != "hello" {
 		t.Errorf("round-trip Text() = %q", r2.Text())
 	}
 	if r2.StructuredContent == nil {
 		t.Error("round-trip StructuredContent is nil")
+	}
+	if len(r2.Content) != 2 {
+		t.Errorf("round-trip Content len = %d, want 2", len(r2.Content))
 	}
 }

@@ -4,12 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-
-	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // Result is the structured output of a tool execution.
-// Uses SDK content types directly — no translation layer.
+// Transport-agnostic — uses Battery-owned content types.
 type Result struct {
 	Content           []Content `json:"content"`
 	StructuredContent any       `json:"structuredContent,omitempty"`
@@ -20,7 +18,7 @@ type Result struct {
 func (r Result) Text() string {
 	var parts []string
 	for _, c := range r.Content {
-		if tc, ok := c.(*sdkmcp.TextContent); ok {
+		if tc, ok := c.(TextContent); ok {
 			parts = append(parts, tc.Text)
 		}
 	}
@@ -30,14 +28,14 @@ func (r Result) Text() string {
 // TextResult creates a Result with a single TextContent block.
 func TextResult(s string) Result {
 	return Result{
-		Content: []Content{&sdkmcp.TextContent{Text: s}},
+		Content: []Content{TextContent{Text: s}},
 	}
 }
 
 // ErrorResult creates a Result with an error message and IsError=true.
 func ErrorResult(err error) Result {
 	return Result{
-		Content: []Content{&sdkmcp.TextContent{Text: err.Error()}},
+		Content: []Content{TextContent{Text: err.Error()}},
 		IsError: true,
 	}
 }
@@ -50,25 +48,47 @@ func StructuredResult(v any) (Result, error) {
 		return Result{}, fmt.Errorf("battery: marshal structured result: %w", err)
 	}
 	return Result{
-		Content:           []Content{&sdkmcp.TextContent{Text: string(data)}},
+		Content:           []Content{TextContent{Text: string(data)}},
 		StructuredContent: json.RawMessage(data),
 	}, nil
 }
 
-// ToSDK converts a Battery Result to an SDK CallToolResult.
-func (r Result) ToSDK() *sdkmcp.CallToolResult {
-	return &sdkmcp.CallToolResult{
-		Content:           r.Content,
-		StructuredContent: r.StructuredContent,
-		IsError:           r.IsError,
+// MarshalJSON serializes Result using the content type registry.
+func (r Result) MarshalJSON() ([]byte, error) {
+	type resultWire struct {
+		Content           []wireContent `json:"content"`
+		StructuredContent any           `json:"structuredContent,omitempty"`
+		IsError           bool          `json:"isError,omitempty"`
 	}
+	w := resultWire{StructuredContent: r.StructuredContent, IsError: r.IsError}
+	for _, c := range r.Content {
+		if wc, ok := encodeContent(c); ok {
+			w.Content = append(w.Content, wc)
+		}
+	}
+	return json.Marshal(w)
 }
 
-// ResultFromSDK converts an SDK CallToolResult to a Battery Result.
-func ResultFromSDK(sdk *sdkmcp.CallToolResult) Result {
-	return Result{
-		Content:           sdk.Content,
-		StructuredContent: sdk.StructuredContent,
-		IsError:           sdk.IsError,
+// UnmarshalJSON deserializes Result using the content type registry.
+func (r *Result) UnmarshalJSON(data []byte) error {
+	type resultWire struct {
+		Content           []wireContent   `json:"content"`
+		StructuredContent json.RawMessage `json:"structuredContent,omitempty"`
+		IsError           bool            `json:"isError,omitempty"`
 	}
+	var w resultWire
+	if err := json.Unmarshal(data, &w); err != nil {
+		return err
+	}
+	r.IsError = w.IsError
+	if len(w.StructuredContent) > 0 {
+		r.StructuredContent = w.StructuredContent
+	}
+	r.Content = make([]Content, 0, len(w.Content))
+	for i := range w.Content {
+		if c, ok := decodeContent(w.Content[i]); ok {
+			r.Content = append(r.Content, c)
+		}
+	}
+	return nil
 }

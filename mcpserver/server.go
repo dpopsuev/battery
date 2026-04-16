@@ -268,7 +268,7 @@ func adaptHandler(h server.Handler) sdkmcp.ToolHandler {
 	return func(ctx context.Context, req *sdkmcp.CallToolRequest) (res *sdkmcp.CallToolResult, retErr error) {
 		defer func() {
 			if r := recover(); r != nil {
-				res = toSDKResult(tool.ErrorResult(fmt.Errorf("%w: %v", ErrHandlerPanicked, r)))
+				res = resultToSDK(tool.ErrorResult(fmt.Errorf("%w: %v", ErrHandlerPanicked, r)))
 				retErr = nil
 			}
 		}()
@@ -280,9 +280,9 @@ func adaptHandler(h server.Handler) sdkmcp.ToolHandler {
 
 		result, err := h(ctx, input)
 		if err != nil {
-			return toSDKResult(tool.ErrorResult(err)), nil
+			return resultToSDK(tool.ErrorResult(err)), nil
 		}
 
-		return toSDKResult(result), nil
+		return resultToSDK(result), nil
 	}
 }

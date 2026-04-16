@@ -40,6 +40,63 @@ func (t *mcpTool) Execute(ctx context.Context, input json.RawMessage) (tool.Resu
 		return tool.Result{}, fmt.Errorf("mcp tool %s: call: %w", t.Name(), err)
 	}
 
-	// No translation needed — tool.Content IS sdkmcp.Content.
-	return tool.ResultFromSDK(sdkResult), nil
+	return resultFromSDK(sdkResult), nil
+}
+
+// sdkContentConverter converts an SDK Content to a Battery Content.
+type sdkContentConverter func(sdkmcp.Content) (tool.Content, bool)
+
+// sdkConverters maps SDK content types to Battery converters.
+var sdkConverters []sdkContentConverter //nolint:gochecknoglobals // strategy registry
+
+func init() {
+	sdkConverters = []sdkContentConverter{
+		func(c sdkmcp.Content) (tool.Content, bool) {
+			if v, ok := c.(*sdkmcp.TextContent); ok {
+				return tool.TextContent{Text: v.Text}, true
+			}
+			return nil, false
+		},
+		func(c sdkmcp.Content) (tool.Content, bool) {
+			if v, ok := c.(*sdkmcp.ImageContent); ok {
+				return tool.ImageContent{MIMEType: v.MIMEType, Data: v.Data}, true
+			}
+			return nil, false
+		},
+		func(c sdkmcp.Content) (tool.Content, bool) {
+			if v, ok := c.(*sdkmcp.AudioContent); ok {
+				return tool.AudioContent{MIMEType: v.MIMEType, Data: v.Data}, true
+			}
+			return nil, false
+		},
+		func(c sdkmcp.Content) (tool.Content, bool) {
+			if v, ok := c.(*sdkmcp.ResourceLink); ok {
+				return tool.ResourceLink{URI: v.URI, Name: v.Name, Description: v.Description, MIMEType: v.MIMEType}, true
+			}
+			return nil, false
+		},
+		func(c sdkmcp.Content) (tool.Content, bool) {
+			if v, ok := c.(*sdkmcp.EmbeddedResource); ok && v.Resource != nil {
+				return tool.ResourceContent{URI: v.Resource.URI, MIMEType: v.Resource.MIMEType, Text: v.Resource.Text, Blob: v.Resource.Blob}, true
+			}
+			return nil, false
+		},
+	}
+}
+
+// resultFromSDK translates an SDK CallToolResult to a Battery Result.
+func resultFromSDK(sdk *sdkmcp.CallToolResult) tool.Result {
+	r := tool.Result{
+		IsError:           sdk.IsError,
+		StructuredContent: sdk.StructuredContent,
+	}
+	for _, sc := range sdk.Content {
+		for _, conv := range sdkConverters {
+			if bc, ok := conv(sc); ok {
+				r.Content = append(r.Content, bc)
+				break
+			}
+		}
+	}
+	return r
 }
