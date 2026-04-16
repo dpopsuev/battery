@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/dpopsuev/battery"
 	"github.com/dpopsuev/battery/tool"
 )
 
@@ -30,7 +31,18 @@ type Envelope struct {
 var _ tool.Executor = (*Envelope)(nil)
 
 // Execute runs the full pipeline: check gates → enrich → execute → record.
+// Automatically sets the Envelope as the context executor and decrements TTL.
 func (e *Envelope) Execute(ctx context.Context, name string, input json.RawMessage) (tool.Result, error) {
+	// TTL circuit breaking.
+	var err error
+	ctx, err = battery.DecrementTTL(ctx)
+	if err != nil {
+		return tool.Result{}, err
+	}
+
+	// Inject self as the context executor for tool-to-tool calls.
+	ctx = battery.ContextWithExecutor(ctx, e)
+
 	// Gates.
 	for _, g := range e.gates {
 		v, err := g.Check(ctx, name, input)
