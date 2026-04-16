@@ -26,6 +26,9 @@ type Envelope struct {
 	cacheStore       CacheStore // optional; nil = no caching
 	cacheHook        CacheHook  // optional; nil = no cache event notifications
 	cacheTTL         time.Duration
+	circuitBreaker   *CircuitBreaker // optional; nil = no circuit breaking
+	retryPolicy      *RetryPolicy    // optional; nil = no retry
+	rateLimiter      *RateLimiter    // optional; nil = no rate limiting
 }
 
 var _ tool.Executor = (*Envelope)(nil)
@@ -74,15 +77,7 @@ func (e *Envelope) Execute(ctx context.Context, name string, input json.RawMessa
 	if cacheHit {
 		output = *cached
 	} else {
-		// Execute.
-		start := time.Now()
-		output, execErr = e.executor.Execute(ctx, name, input)
-		elapsed = time.Since(start)
-
-		// Cache store (untruncated result).
-		if execErr == nil && cacheKey != "" {
-			e.storeCache(ctx, name, cacheKey, output)
-		}
+		output, elapsed, execErr = e.executeFresh(ctx, name, input, cacheKey)
 	}
 
 	// Append enrichments to result on success.
@@ -110,6 +105,71 @@ func (e *Envelope) Execute(ctx context.Context, name string, input json.RawMessa
 	}
 
 	return output, execErr
+}
+
+// executeFresh handles rate limiting, circuit breaking, execution, and cache store.
+func (e *Envelope) executeFresh(ctx context.Context, name string, input json.RawMessage, cacheKey string) (tool.Result, time.Duration, error) {
+	if e.rateLimiter != nil {
+		if err := e.rateLimiter.Allow(name); err != nil {
+			return tool.Result{}, 0, err
+		}
+	}
+
+	if e.circuitBreaker != nil {
+		if err := e.circuitBreaker.Allow(name); err != nil {
+			return tool.Result{}, 0, err
+		}
+	}
+
+	start := time.Now()
+	output, execErr := e.executeWithRetry(ctx, name, input)
+	elapsed := time.Since(start)
+
+	if e.circuitBreaker != nil {
+		if execErr != nil {
+			e.circuitBreaker.RecordFailure(name)
+		} else {
+			e.circuitBreaker.RecordSuccess(name)
+		}
+	}
+
+	if execErr == nil && cacheKey != "" {
+		e.storeCache(ctx, name, cacheKey, output)
+	}
+
+	return output, elapsed, execErr
+}
+
+// executeWithRetry runs the executor with optional retry policy.
+func (e *Envelope) executeWithRetry(ctx context.Context, name string, input json.RawMessage) (tool.Result, error) {
+	if e.retryPolicy == nil {
+		return e.executor.Execute(ctx, name, input)
+	}
+
+	var lastErr error
+	for attempt := range e.retryPolicy.MaxAttempts {
+		result, err := e.executor.Execute(ctx, name, input)
+		if err == nil {
+			return result, nil
+		}
+		lastErr = err
+
+		// Only retry transient errors.
+		if e.retryPolicy.IsTransient != nil && !e.retryPolicy.IsTransient(err) {
+			return tool.Result{}, err
+		}
+
+		// Don't sleep after last attempt.
+		if attempt < e.retryPolicy.MaxAttempts-1 && e.retryPolicy.Backoff != nil {
+			delay := e.retryPolicy.Backoff(attempt)
+			select {
+			case <-time.After(delay):
+			case <-ctx.Done():
+				return tool.Result{}, ctx.Err()
+			}
+		}
+	}
+	return tool.Result{}, lastErr
 }
 
 // All delegates to the wrapped executor.
@@ -241,6 +301,9 @@ type Builder struct {
 	cacheStore       CacheStore
 	cacheHook        CacheHook
 	cacheTTL         time.Duration
+	circuitBreaker   *CircuitBreaker
+	retryPolicy      *RetryPolicy
+	rateLimiter      *RateLimiter
 }
 
 // NewBuilder creates an Envelope builder wrapping the given executor.
@@ -305,6 +368,26 @@ func (b *Builder) WithGaugeFunc(fn GaugeFunc) *Builder {
 	return b
 }
 
+// WithCircuitBreaker enables per-tool failure tracking.
+// After maxFailures within window, the circuit opens for cooldown duration.
+func (b *Builder) WithCircuitBreaker(maxFailures int, window, cooldown time.Duration) *Builder {
+	b.circuitBreaker = NewCircuitBreaker(maxFailures, window, cooldown)
+	return b
+}
+
+// WithRetry enables automatic retry for transient failures.
+// isTransient determines which errors are retryable (nil = retry all).
+func (b *Builder) WithRetry(maxAttempts int, backoff BackoffFunc, isTransient func(error) bool) *Builder {
+	b.retryPolicy = &RetryPolicy{MaxAttempts: maxAttempts, Backoff: backoff, IsTransient: isTransient}
+	return b
+}
+
+// WithRateLimit sets per-tool call rate limiting.
+func (b *Builder) WithRateLimit(maxCalls int, window time.Duration) *Builder {
+	b.rateLimiter = NewRateLimiter(maxCalls, window)
+	return b
+}
+
 // WithCache enables result caching for tools that implement tool.Cacheable.
 // The store holds serialized tool.Result values. The hook receives hit/miss events.
 // TTL applies to all cached entries (0 = store's default).
@@ -330,5 +413,8 @@ func (b *Builder) Build() (*Envelope, error) {
 		cacheStore:       b.cacheStore,
 		cacheHook:        b.cacheHook,
 		cacheTTL:         b.cacheTTL,
+		circuitBreaker:   b.circuitBreaker,
+		retryPolicy:      b.retryPolicy,
+		rateLimiter:      b.rateLimiter,
 	}, nil
 }
