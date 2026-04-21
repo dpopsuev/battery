@@ -109,11 +109,21 @@ func (s *Server) build() {
 
 // Tool registers a tool using server.ToolMeta for metadata and handler
 // for the handler function. The handler is auto-wrapped with Observable for
-// timing/logging. InputSchema defaults to {"type":"object"}.
+// timing/logging. Uses meta.InputSchema when set, otherwise defaults to {"type":"object"}.
 func (s *Server) Tool(meta server.ToolMeta, h handler) *Server {
 	s.build()
 	observed := observable(meta.Name, h)
-	t := buildSDKTool(meta, map[string]any{"type": "object"}, nil)
+
+	var schemaObj any
+	if meta.InputSchema != nil {
+		if err := json.Unmarshal(meta.InputSchema, &schemaObj); err != nil {
+			schemaObj = map[string]any{"type": "object"}
+		}
+	} else {
+		schemaObj = map[string]any{"type": "object"}
+	}
+
+	t := buildSDKTool(meta, schemaObj, nil)
 	s.sdk.AddTool(t, adaptHandler(observed))
 	return s
 }

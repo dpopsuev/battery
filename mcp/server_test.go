@@ -82,6 +82,71 @@ func TestServer_ToolRegistration(t *testing.T) {
 	}
 }
 
+// --- Test 1b: InputSchema from ToolMeta ---
+
+func TestServer_ToolMetaInputSchema(t *testing.T) {
+	t.Parallel()
+
+	schema := json.RawMessage(`{
+		"type": "object",
+		"properties": {
+			"action": {"type": "string", "enum": ["ping", "pong"]},
+			"target": {"type": "string"}
+		},
+		"required": ["action"]
+	}`)
+
+	srv := battmcp.NewServer("test-server", "v0.1.0").
+		Tool(server.ToolMeta{
+			Name:        "with_schema",
+			Description: "Tool with explicit schema",
+			InputSchema: schema,
+		}, func(_ context.Context, input json.RawMessage) (tool.Result, error) {
+			return tool.TextResult(string(input)), nil
+		}).
+		Tool(server.ToolMeta{
+			Name:        "no_schema",
+			Description: "Tool without schema",
+		}, func(_ context.Context, input json.RawMessage) (tool.Result, error) {
+			return tool.TextResult(string(input)), nil
+		})
+
+	session := connectClient(t, srv)
+
+	result, err := session.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+
+	for _, tl := range result.Tools {
+		schemaBytes, err := json.Marshal(tl.InputSchema)
+		if err != nil {
+			t.Fatalf("marshal schema for %s: %v", tl.Name, err)
+		}
+		var schemaMap map[string]any
+		if err := json.Unmarshal(schemaBytes, &schemaMap); err != nil {
+			t.Fatalf("unmarshal schema for %s: %v", tl.Name, err)
+		}
+
+		switch tl.Name {
+		case "with_schema":
+			if _, ok := schemaMap["properties"]; !ok {
+				t.Error("with_schema: expected properties in schema")
+			}
+			if _, ok := schemaMap["required"]; !ok {
+				t.Error("with_schema: expected required in schema")
+			}
+		case "no_schema":
+			if schemaMap["type"] != "object" {
+				t.Errorf("no_schema: expected type=object, got %v", schemaMap["type"])
+			}
+			if _, ok := schemaMap["properties"]; ok {
+				t.Error("no_schema: unexpected properties in bare schema")
+			}
+		}
+	}
+}
+
 // --- Test 2: Tool Execution ---
 
 func TestServer_ToolExecution(t *testing.T) {

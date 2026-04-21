@@ -2,6 +2,8 @@
 // keywords, categories, and intent-based triage for tool discovery.
 package server
 
+import "encoding/json"
+
 // ToolMeta is enriched metadata beyond tool.Tool — keywords, categories, priority.
 type ToolMeta struct {
 	Name        string            `json:"name"`
@@ -10,5 +12,6 @@ type ToolMeta struct {
 	Categories  []string          `json:"categories,omitempty"`
 	Priority    int               `json:"priority,omitempty"`
 	DefaultArgs map[string]any    `json:"default_args,omitempty"`
-	Rationale   map[string]string `json:"rationale,omitempty"` // category → why this tool matters
+	Rationale   map[string]string `json:"rationale,omitempty"`
+	InputSchema json.RawMessage   `json:"input_schema,omitempty"`
 }
