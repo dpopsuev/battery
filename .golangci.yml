@@ -1,5 +1,7 @@
 # golangci-lint config — aligned with Lex pragmatic rules
 
+version: "2"
+
 run:
   timeout: 5m
   tests: true
@@ -13,8 +15,6 @@ linters:
     - staticcheck
     - unused
     - ineffassign
-    - gosimple
-    - typecheck
 
     # --- Lex: go-best-practices ---
     - goconst
@@ -34,7 +34,6 @@ linters:
     - misspell
 
     # --- Lex: solid ---
-    - goimports
     - unconvert
     - unparam
 

@@ -174,6 +174,12 @@ func buildSDKTool(meta server.ToolMeta, inputSchema any, bt tool.Tool) *sdkmcp.T
 		Description: meta.Description,
 		InputSchema: inputSchema,
 	}
+	if meta.OutputSchema != nil {
+		var outputSchemaObj any
+		if err := json.Unmarshal(meta.OutputSchema, &outputSchemaObj); err == nil {
+			t.OutputSchema = outputSchemaObj
+		}
+	}
 
 	// Derive ToolAnnotations from optional interfaces.
 	if bt != nil {
