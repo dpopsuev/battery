@@ -9,37 +9,37 @@ import (
 	"github.com/dpopsuev/battery"
 	"github.com/dpopsuev/battery/bus"
 	"github.com/dpopsuev/battery/nerve"
-	"github.com/dpopsuev/battery/organ"
+	"github.com/dpopsuev/battery/adapter"
 	"github.com/dpopsuev/battery/tool"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// OrganBridge wraps an MCP server as an Organ.
+// EventBridge wraps an MCP server as an EventAdapter.
 // Discovers tools via ListTools, subscribes to Motor events for each,
 // and publishes Sense events with results.
-type OrganBridge struct {
+type EventBridge struct {
 	name    string
 	tools   []tool.Tool
 	session *sdkmcp.ClientSession
 	client  *sdkmcp.Client
 }
 
-// NewOrganBridge connects to an MCP server and discovers its tools.
-func NewOrganBridge(ctx context.Context, name string, transport sdkmcp.Transport) (*OrganBridge, error) {
+// NewEventBridge connects to an MCP server and discovers its tools.
+func NewEventBridge(ctx context.Context, name string, transport sdkmcp.Transport) (*EventBridge, error) {
 	clientVersion := "battery/" + battery.Version
 	client := sdkmcp.NewClient(
-		&sdkmcp.Implementation{Name: "battery-organ-bridge", Version: clientVersion},
+		&sdkmcp.Implementation{Name: "battery-event-bridge", Version: clientVersion},
 		nil,
 	)
 
 	session, err := client.Connect(ctx, transport, nil)
 	if err != nil {
-		return nil, fmt.Errorf("organ bridge %q connect: %w", name, err)
+		return nil, fmt.Errorf("event bridge %q connect: %w", name, err)
 	}
 
 	if initResult := session.InitializeResult(); initResult != nil && initResult.ServerInfo != nil {
-		slog.InfoContext(ctx, "organ bridge: MCP connected",
-			"organ", name,
+		slog.InfoContext(ctx, "event bridge: MCP connected",
+			"adapter", name,
 			"server", initResult.ServerInfo.Name,
 			"version", initResult.ServerInfo.Version,
 		)
@@ -48,7 +48,7 @@ func NewOrganBridge(ctx context.Context, name string, transport sdkmcp.Transport
 	listResult, err := session.ListTools(ctx, nil)
 	if err != nil {
 		_ = session.Close()
-		return nil, fmt.Errorf("organ bridge %q list tools: %w", name, err)
+		return nil, fmt.Errorf("event bridge %q list tools: %w", name, err)
 	}
 
 	tools := make([]tool.Tool, 0, len(listResult.Tools))
@@ -68,7 +68,7 @@ func NewOrganBridge(ctx context.Context, name string, transport sdkmcp.Transport
 		})
 	}
 
-	return &OrganBridge{
+	return &EventBridge{
 		name:    name,
 		tools:   tools,
 		session: session,
@@ -76,37 +76,37 @@ func NewOrganBridge(ctx context.Context, name string, transport sdkmcp.Transport
 	}, nil
 }
 
-// Name returns the organ name.
-func (b *OrganBridge) Name() string { return b.name }
+// Name returns the adapter name.
+func (b *EventBridge) Name() string { return b.name }
 
 // Description returns a generated description.
-func (b *OrganBridge) Description() string {
-	return fmt.Sprintf("MCP organ bridge: %s (%d tools)", b.name, len(b.tools))
+func (b *EventBridge) Description() string {
+	return fmt.Sprintf("MCP event bridge: %s (%d tools)", b.name, len(b.tools))
 }
 
 // Labels returns standard labels.
-func (b *OrganBridge) Labels() []string { return []string{"mcp", "external"} }
+func (b *EventBridge) Labels() []string { return []string{"mcp", "external"} }
 
 // Tools returns the discovered MCP tools.
-func (b *OrganBridge) Tools() []tool.Tool { return b.tools }
+func (b *EventBridge) Tools() []tool.Tool { return b.tools }
 
-// Subscriptions returns the Motor event types this organ handles.
-func (b *OrganBridge) Subscriptions() organ.Subscriptions {
+// Subscriptions returns the Motor event types this adapter handles.
+func (b *EventBridge) Subscriptions() adapter.Subscriptions {
 	motor := make([]string, 0, len(b.tools))
 	for _, t := range b.tools {
 		motor = append(motor, t.Name())
 	}
-	return organ.Subscriptions{Motor: motor}
+	return adapter.Subscriptions{Motor: motor}
 }
 
 // Directives returns empty directives.
-func (b *OrganBridge) Directives() []string { return nil }
+func (b *EventBridge) Directives() []string { return nil }
 
 // Contributions returns empty contributions.
-func (b *OrganBridge) Contributions() organ.Contributions { return organ.Contributions{} }
+func (b *EventBridge) Contributions() adapter.Contributions { return adapter.Contributions{} }
 
 // Mount subscribes to Motor events for each tool and publishes Sense results.
-func (b *OrganBridge) Mount(n nerve.Nerve) func() {
+func (b *EventBridge) Mount(n nerve.Nerve) func() {
 	unsubs := make([]func(), 0, len(b.tools))
 	for _, t := range b.tools {
 		t := t
@@ -141,6 +141,6 @@ func (b *OrganBridge) Mount(n nerve.Nerve) func() {
 }
 
 // Close disconnects from the MCP server.
-func (b *OrganBridge) Close() error {
+func (b *EventBridge) Close() error {
 	return b.session.Close()
 }

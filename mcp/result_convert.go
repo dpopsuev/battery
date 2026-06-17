@@ -1,6 +1,8 @@
 package mcp
 
 import (
+	"bytes"
+
 	"github.com/dpopsuev/battery/tool"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -48,11 +50,25 @@ func init() {
 	}
 }
 
+// isJSONArray reports whether raw is a JSON array. MCP structured content
+// must be an object; arrays must be passed through the text fallback only.
+func isJSONArray(raw any) bool {
+	if b, ok := raw.(interface{ MarshalJSON() ([]byte, error) }); ok {
+		data, err := b.MarshalJSON()
+		return err == nil && bytes.HasPrefix(bytes.TrimSpace(data), []byte("["))
+	}
+	return false
+}
+
 // resultToSDK translates a Battery Result to an SDK CallToolResult.
 func resultToSDK(r tool.Result) *sdkmcp.CallToolResult {
+	sc := r.StructuredContent
+	if isJSONArray(sc) {
+		sc = nil
+	}
 	sdk := &sdkmcp.CallToolResult{
 		IsError:           r.IsError,
-		StructuredContent: r.StructuredContent,
+		StructuredContent: sc,
 	}
 	for _, bc := range r.Content {
 		for _, conv := range toSDKConverters {

@@ -1,4 +1,4 @@
-package organ_test
+package adapter_test
 
 import (
 	"context"
@@ -8,7 +8,7 @@ import (
 
 	"github.com/dpopsuev/battery/bus"
 	"github.com/dpopsuev/battery/nerve"
-	"github.com/dpopsuev/battery/organ"
+	"github.com/dpopsuev/battery/adapter"
 	"github.com/dpopsuev/battery/tool"
 )
 
@@ -24,7 +24,7 @@ func (echoTool) Execute(_ context.Context, _ json.RawMessage) (tool.Result, erro
 }
 
 func TestBuilder_ConstructsValidOrgan(t *testing.T) {
-	o := organ.NewBuilder("echo").
+	o := adapter.NewBuilder("echo").
 		WithDescription("Echo organ").
 		WithLabels("test", "echo").
 		WithDirectives("Use echo.ping to test.").
@@ -51,7 +51,7 @@ func TestBuilder_ConstructsValidOrgan(t *testing.T) {
 }
 
 func TestBuilder_MountWiresMotorToSense(t *testing.T) {
-	o := organ.NewBuilder("echo").
+	o := adapter.NewBuilder("echo").
 		MotorAction(echoEvent, echoTool{}, func(_ context.Context, _ bus.MotorEvent) (bus.SenseEvent, error) {
 			return bus.SenseEvent{
 				Payload: json.RawMessage(`{"reply":"pong"}`),
@@ -86,7 +86,7 @@ func TestBuilder_MountWiresMotorToSense(t *testing.T) {
 }
 
 func TestBuilder_MountHandlerErrorPublishesErrorSense(t *testing.T) {
-	o := organ.NewBuilder("fail").
+	o := adapter.NewBuilder("fail").
 		MotorAction("fail.op", echoTool{}, func(_ context.Context, _ bus.MotorEvent) (bus.SenseEvent, error) {
 			return bus.SenseEvent{}, context.DeadlineExceeded
 		}).
@@ -115,7 +115,7 @@ func TestBuilder_MountHandlerErrorPublishesErrorSense(t *testing.T) {
 }
 
 func TestBuilder_UnmountCleansUp(t *testing.T) {
-	o := organ.NewBuilder("echo").
+	o := adapter.NewBuilder("echo").
 		MotorAction(echoEvent, echoTool{}, func(_ context.Context, _ bus.MotorEvent) (bus.SenseEvent, error) {
 			return bus.SenseEvent{Payload: json.RawMessage(`{}`)}, nil
 		}).
@@ -145,14 +145,14 @@ func TestBuilder_UnmountCleansUp(t *testing.T) {
 }
 
 func TestContextAssemblyHandler_Signature(t *testing.T) {
-	handler := organ.ContextAssemblyHandler(func(_ context.Context, input organ.ContextAssemblyInput) (organ.ContextAssemblyOutput, error) {
+	handler := adapter.ContextAssemblyHandler(func(_ context.Context, input adapter.ContextAssemblyInput) (adapter.ContextAssemblyOutput, error) {
 		if input.Turn < 1 {
-			return organ.ContextAssemblyOutput{Abort: true}, nil
+			return adapter.ContextAssemblyOutput{Abort: true}, nil
 		}
-		return organ.ContextAssemblyOutput{}, nil
+		return adapter.ContextAssemblyOutput{}, nil
 	})
 
-	out, err := handler(context.Background(), organ.ContextAssemblyInput{Turn: 0})
+	out, err := handler(context.Background(), adapter.ContextAssemblyInput{Turn: 0})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,7 +160,7 @@ func TestContextAssemblyHandler_Signature(t *testing.T) {
 		t.Error("expected abort on turn 0")
 	}
 
-	out, err = handler(context.Background(), organ.ContextAssemblyInput{Turn: 1})
+	out, err = handler(context.Background(), adapter.ContextAssemblyInput{Turn: 1})
 	if err != nil {
 		t.Fatal(err)
 	}

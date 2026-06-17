@@ -1,7 +1,8 @@
-// Package organ defines the EDA agent component contract.
-// An Organ is a pluggable component that contributes tools, handles events,
-// and can inject directives and context assembly handlers.
-package organ
+// Package adapter defines the EDA event adapter contract.
+// An EventAdapter is a pluggable component that bridges capabilities
+// into the event bus system — handling Motor commands, publishing
+// Sense observations, and contributing context assembly handlers.
+package adapter
 
 import (
 	"context"
@@ -11,8 +12,8 @@ import (
 	"github.com/dpopsuev/battery/tool"
 )
 
-// Organ is the EDA agent component interface.
-type Organ interface {
+// EventAdapter is the EDA component interface.
+type EventAdapter interface {
 	Name() string
 	Description() string
 	Labels() []string
@@ -24,13 +25,13 @@ type Organ interface {
 	Contributions() Contributions
 }
 
-// Subscriptions declares which event types this organ handles.
+// Subscriptions declares which event types this adapter handles.
 type Subscriptions struct {
 	Motor []string
 	Sense []string
 }
 
-// Contributions holds cross-organ contribution points.
+// Contributions holds cross-adapter contribution points.
 type Contributions struct {
 	ContextAssemble ContextAssemblyHandler
 }

@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(golangci-lint run *)",
+      "Bash(goimports *)",
+      "Bash(find /home/dpopsuev/Workspace/battery -name \"*test*.go\" -exec grep -l \"mcpserver\\\\|TextResult\" {} \\\\;)",
+      "Bash(find *)",
+      "Bash(grep -n \"ServerInfo\\\\|func.*ClientSession.*Server\" /home/dpopsuev/go/pkg/mod/github.com/modelcontextprotocol/go-sdk@v1.5.0/mcp/*.go)",
+      "Read(//home/dpopsuev/Workspace/troupe/**)",
+      "Bash(grep -n \"Tracer\\\\|RoundTrip\\\\|For\" /home/dpopsuev/Workspace/battery/observer/*.go)",
+      "Bash(awk -F: '{sum+=$2} END {print \"Total test functions:\", sum}')",
+      "Bash(wc *)",
+      "WebSearch",
+      "Bash(mkdir -p /home/dpopsuev/Workspace/lexicon/mcp/rules/workflows)",
+      "Bash(mv /home/dpopsuev/Workspace/lexicon/generic/rules/workflows/asterisk-workflow.md /home/dpopsuev/Workspace/lexicon/generic/rules/workflows/emcee-workflow.md /home/dpopsuev/Workspace/lexicon/generic/rules/workflows/limes-workflow.md /home/dpopsuev/Workspace/lexicon/generic/rules/workflows/locus-usage.md /home/dpopsuev/Workspace/lexicon/generic/rules/workflows/locus-workflow.md /home/dpopsuev/Workspace/lexicon/generic/rules/workflows/scribe-workflow.md /home/dpopsuev/Workspace/lexicon/generic/rules/workflows/tubus-workflow.md /home/dpopsuev/Workspace/lexicon/mcp/rules/workflows/)"
+    ]
+  }
+}

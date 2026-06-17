@@ -8,7 +8,7 @@ import (
 
 	"github.com/dpopsuev/battery/bus"
 	"github.com/dpopsuev/battery/inprocess"
-	"github.com/dpopsuev/battery/organ"
+	"github.com/dpopsuev/battery/adapter"
 	"github.com/dpopsuev/battery/tool"
 )
 
@@ -23,9 +23,9 @@ func (pingTool) Execute(_ context.Context, _ json.RawMessage) (tool.Result, erro
 	return tool.TextResult("pong"), nil
 }
 
-func echoOrgan() organ.Organ {
-	return organ.NewBuilder("echo").
-		WithDescription("Echo organ for testing.").
+func echoAdapter() adapter.EventAdapter {
+	return adapter.NewBuilder("echo").
+		WithDescription("Echo adapter for testing.").
 		MotorAction(pingEvent, pingTool{}, func(_ context.Context, _ bus.MotorEvent) (bus.SenseEvent, error) {
 			return bus.SenseEvent{
 				Payload: json.RawMessage(`{"reply":"pong"}`),
@@ -37,9 +37,9 @@ func echoOrgan() organ.Organ {
 
 func TestAdapter_TwoOrgansCompose(t *testing.T) {
 	a := inprocess.New()
-	a.Load(echoOrgan())
+	a.Load(echoAdapter())
 
-	upperOrgan := organ.NewBuilder("upper").
+	upperOrgan := adapter.NewBuilder("upper").
 		WithDescription("Uppercases echo results.").
 		MotorAction("upper.shout", pingTool{}, func(_ context.Context, _ bus.MotorEvent) (bus.SenseEvent, error) {
 			return bus.SenseEvent{
@@ -82,7 +82,7 @@ func TestAdapter_TwoOrgansCompose(t *testing.T) {
 
 func TestAdapter_StopUnmountsInReverse(t *testing.T) {
 	a := inprocess.New()
-	a.Load(echoOrgan())
+	a.Load(echoAdapter())
 
 	if err := a.Start(context.Background()); err != nil {
 		t.Fatal(err)
@@ -112,7 +112,7 @@ func TestAdapter_StopUnmountsInReverse(t *testing.T) {
 
 func TestAdapter_DoubleStartErrors(t *testing.T) {
 	a := inprocess.New()
-	a.Load(echoOrgan())
+	a.Load(echoAdapter())
 	_ = a.Start(context.Background())
 	defer func() { _ = a.Stop(context.Background()) }()
 

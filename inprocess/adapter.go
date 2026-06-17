@@ -1,5 +1,5 @@
 // Package inprocess provides a zero-transport adapter for composing
-// organs in the same process. Used for testing and single-process agents.
+// event adapters in the same process. Used for testing and single-process agents.
 package inprocess
 
 import (
@@ -8,16 +8,16 @@ import (
 
 	"github.com/dpopsuev/battery/bus"
 	"github.com/dpopsuev/battery/nerve"
-	"github.com/dpopsuev/battery/organ"
+	"github.com/dpopsuev/battery/adapter"
 )
 
 // ErrAlreadyStarted is returned when Start is called twice.
 var ErrAlreadyStarted = errors.New("inprocess: already started")
 
-// Adapter composes multiple Organs around a shared InProcessNerve.
+// Adapter composes multiple EventAdapters around a shared InProcessNerve.
 type Adapter struct {
 	nerve    *nerve.InProcessNerve
-	organs   []organ.Organ
+	adapters   []adapter.EventAdapter
 	unmounts []func()
 	started  bool
 }
@@ -29,31 +29,31 @@ func New(opts ...nerve.Option) *Adapter {
 	}
 }
 
-// Load adds organs to the adapter. Must be called before Start.
-func (a *Adapter) Load(organs ...organ.Organ) {
-	a.organs = append(a.organs, organs...)
+// Load adds adapters to the adapter. Must be called before Start.
+func (a *Adapter) Load(adapters ...adapter.EventAdapter) {
+	a.adapters = append(a.adapters, adapters...)
 }
 
-// Start mounts all loaded organs on the shared nerve.
+// Start mounts all loaded adapters on the shared nerve.
 func (a *Adapter) Start(_ context.Context) error {
 	if a.started {
 		return ErrAlreadyStarted
 	}
 	a.started = true
-	for _, o := range a.organs {
+	for _, o := range a.adapters {
 		unmount := o.Mount(a.nerve.AsNerve())
 		a.unmounts = append(a.unmounts, unmount)
 	}
 	return nil
 }
 
-// Stop unmounts and closes all organs, then disposes the nerve.
+// Stop unmounts and closes all adapters, then disposes the nerve.
 func (a *Adapter) Stop(_ context.Context) error {
 	for i := len(a.unmounts) - 1; i >= 0; i-- {
 		a.unmounts[i]()
 	}
 	a.unmounts = nil
-	for _, o := range a.organs {
+	for _, o := range a.adapters {
 		if err := o.Close(); err != nil {
 			return err
 		}

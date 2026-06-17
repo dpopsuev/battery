@@ -1,4 +1,4 @@
-package organ
+package adapter
 
 import (
 	"context"
@@ -18,7 +18,7 @@ type motorAction struct {
 	handler   MotorHandler
 }
 
-// Builder constructs an Organ from action maps.
+// Builder constructs an EventAdapter from action maps.
 type Builder struct {
 	name          string
 	description   string
@@ -28,18 +28,18 @@ type Builder struct {
 	contributions Contributions
 }
 
-// NewBuilder starts building an organ with the given name.
+// NewBuilder starts building an adapter with the given name.
 func NewBuilder(name string) *Builder {
 	return &Builder{name: name}
 }
 
-// WithDescription sets the organ description.
+// WithDescription sets the adapter description.
 func (b *Builder) WithDescription(d string) *Builder {
 	b.description = d
 	return b
 }
 
-// WithLabels sets the organ labels.
+// WithLabels sets the adapter labels.
 func (b *Builder) WithLabels(labels ...string) *Builder {
 	b.labels = labels
 	return b
@@ -51,7 +51,7 @@ func (b *Builder) WithDirectives(directives ...string) *Builder {
 	return b
 }
 
-// WithContributions sets cross-organ contributions.
+// WithContributions sets cross-adapter contributions.
 func (b *Builder) WithContributions(c Contributions) *Builder {
 	b.contributions = c
 	return b
@@ -63,15 +63,15 @@ func (b *Builder) MotorAction(eventType string, t tool.Tool, handler MotorHandle
 	return b
 }
 
-// Build constructs the organ.
-func (b *Builder) Build() Organ {
+// Build constructs the adapter.
+func (b *Builder) Build() EventAdapter {
 	tools := make([]tool.Tool, 0, len(b.motorActions))
 	motorSubs := make([]string, 0, len(b.motorActions))
 	for _, a := range b.motorActions {
 		tools = append(tools, a.tool)
 		motorSubs = append(motorSubs, a.eventType)
 	}
-	return &builtOrgan{
+	return &builtEventAdapter{
 		name:          b.name,
 		description:   b.description,
 		labels:        b.labels,
@@ -83,7 +83,7 @@ func (b *Builder) Build() Organ {
 	}
 }
 
-type builtOrgan struct {
+type builtEventAdapter struct {
 	name          string
 	description   string
 	labels        []string
@@ -94,16 +94,16 @@ type builtOrgan struct {
 	contributions Contributions
 }
 
-func (o *builtOrgan) Name() string             { return o.name }
-func (o *builtOrgan) Description() string      { return o.description }
-func (o *builtOrgan) Labels() []string         { return o.labels }
-func (o *builtOrgan) Tools() []tool.Tool       { return o.tools }
-func (o *builtOrgan) Close() error             { return nil }
-func (o *builtOrgan) Subscriptions() Subscriptions { return o.subscriptions }
-func (o *builtOrgan) Directives() []string     { return o.directives }
-func (o *builtOrgan) Contributions() Contributions { return o.contributions }
+func (o *builtEventAdapter) Name() string             { return o.name }
+func (o *builtEventAdapter) Description() string      { return o.description }
+func (o *builtEventAdapter) Labels() []string         { return o.labels }
+func (o *builtEventAdapter) Tools() []tool.Tool       { return o.tools }
+func (o *builtEventAdapter) Close() error             { return nil }
+func (o *builtEventAdapter) Subscriptions() Subscriptions { return o.subscriptions }
+func (o *builtEventAdapter) Directives() []string     { return o.directives }
+func (o *builtEventAdapter) Contributions() Contributions { return o.contributions }
 
-func (o *builtOrgan) Mount(n nerve.Nerve) func() {
+func (o *builtEventAdapter) Mount(n nerve.Nerve) func() {
 	unsubs := make([]func(), 0, len(o.motorActions))
 	for _, a := range o.motorActions {
 		a := a
