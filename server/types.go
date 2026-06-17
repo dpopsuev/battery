@@ -2,7 +2,22 @@
 // keywords, categories, and intent-based triage for tool discovery.
 package server
 
-import "encoding/json"
+import (
+	"context"
+	"encoding/json"
+)
+
+// Handler is a string-returning tool handler (convenience for simple tools).
+type Handler func(ctx context.Context, input json.RawMessage) (string, error)
+
+// JSONResult marshals v as indented JSON. Convenience for Handler implementations.
+func JSONResult(v any) (string, error) {
+	data, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
 
 // ToolMeta is enriched metadata beyond tool.Tool — keywords, categories, priority.
 type ToolMeta struct {

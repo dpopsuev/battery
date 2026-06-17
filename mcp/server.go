@@ -128,6 +128,29 @@ func (s *Server) Tool(meta server.ToolMeta, h handler) *Server {
 	return s
 }
 
+// ToolStringHandler registers a tool with a string-returning handler and explicit schema.
+// Wraps the string result as tool.TextResult for the internal pipeline.
+func (s *Server) ToolStringHandler(meta server.ToolMeta, schema json.RawMessage, h server.Handler) *Server {
+	return s.ToolWithSchema(meta, schema, func(ctx context.Context, input json.RawMessage) (tool.Result, error) {
+		text, err := h(ctx, input)
+		if err != nil {
+			return tool.Result{}, err
+		}
+		return tool.TextResult(text), nil
+	})
+}
+
+// ToolString registers a tool with a string-returning handler (no explicit schema).
+func (s *Server) ToolString(meta server.ToolMeta, h server.Handler) *Server {
+	return s.Tool(meta, func(ctx context.Context, input json.RawMessage) (tool.Result, error) {
+		text, err := h(ctx, input)
+		if err != nil {
+			return tool.Result{}, err
+		}
+		return tool.TextResult(text), nil
+	})
+}
+
 // ToolWithSchema registers a tool with an explicit JSON input schema.
 func (s *Server) ToolWithSchema(meta server.ToolMeta, schema json.RawMessage, h handler) *Server {
 	s.build()
