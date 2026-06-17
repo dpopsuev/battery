@@ -5,19 +5,24 @@ package server
 import (
 	"context"
 	"encoding/json"
+
+	"github.com/dpopsuev/battery/tool"
 )
 
 // Handler is a string-returning tool handler (convenience for simple tools).
 type Handler func(ctx context.Context, input json.RawMessage) (string, error)
 
-// JSONResult marshals v as indented JSON. Convenience for Handler implementations.
-func JSONResult(v any) (string, error) {
+// JSONString marshals v as indented JSON string. For string-returning handlers.
+func JSONString(v any) (string, error) {
 	data, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
 		return "", err
 	}
 	return string(data), nil
 }
+
+// JSONResult creates a tool.Result with structured content. For Result-returning handlers.
+func JSONResult(data any) (tool.Result, error) { return tool.StructuredResult(data) }
 
 // ToolMeta is enriched metadata beyond tool.Tool — keywords, categories, priority.
 type ToolMeta struct {
