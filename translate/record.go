@@ -8,6 +8,11 @@ import "encoding/json"
 
 // Record is the canonical intermediate representation.
 // Generic enough for any data source; structured enough for graph storage.
+//
+// Well-known Extra keys for reference resolution:
+//
+//	ref_backend — source tool name (e.g., "emcee", "locus", "conty", "gundog")
+//	ref_id      — native ID in the source system (e.g., "jira:AUTH-42", URL)
 type Record struct {
 	ID       string            `json:"id"`
 	Kind     string            `json:"kind"`
